@@ -13,7 +13,13 @@ from __future__ import annotations
 import asyncio
 
 from . import devices, platform
-from .constants import ADAPTER_IFACE, BLUEZ_SERVICE, DBUS_TIMEOUT, DEVICE_IFACE, logger
+from .constants import (
+    ADAPTER_IFACE,
+    BLUEZ_SERVICE,
+    DBUS_TIMEOUT,
+    DEVICE_IFACE,
+    logger,
+)
 
 
 async def set_adapter_pairable(adapter: str = "hci0", pairable: bool = True, timeout: float = DBUS_TIMEOUT) -> bool:
@@ -103,4 +109,44 @@ async def disconnect_device(address: str, timeout: float = DBUS_TIMEOUT) -> bool
             bus.disconnect()
     except Exception as exc:
         logger.debug("Failed to disconnect BlueZ device: %s: %s", type(exc).__name__, exc)
+        return False
+
+
+async def remove_device(address: str, timeout: float = DBUS_TIMEOUT) -> bool:
+    """Remove a cached/bonded Device1 object via Adapter1.RemoveDevice.
+
+    Intended only for recovery after repeated pre-services unresolved drops
+    caused by a stale BlueZ LTK/bond. Returns False on non-BlueZ platforms or
+    when the device is not present in the BlueZ object tree.
+    """
+    if not platform.is_bluez_platform():
+        return False
+    info = await devices.find_device(address, timeout=timeout)
+    if not info or not info.get("path"):
+        return False
+    dev_path = info["path"]
+    adapter_path = dev_path.rsplit("/", 1)[0] if "/" in dev_path else ""
+    if not adapter_path:
+        adapter_path = "/org/bluez/hci0"
+
+    from dbus_fast import BusType, Message, MessageType
+    from dbus_fast.aio import MessageBus
+
+    try:
+        bus = await asyncio.wait_for(MessageBus(bus_type=BusType.SYSTEM).connect(), timeout=timeout)
+        try:
+            msg = Message(
+                destination=BLUEZ_SERVICE,
+                path=adapter_path,
+                interface=ADAPTER_IFACE,
+                member="RemoveDevice",
+                signature="o",
+                body=[dev_path],
+            )
+            reply = await asyncio.wait_for(bus.call(msg), timeout=timeout)
+            return reply.message_type == MessageType.METHOD_RETURN or reply.message_type == 2
+        finally:
+            bus.disconnect()
+    except Exception as exc:
+        logger.debug("Failed to remove BlueZ device %s: %s: %s", address, type(exc).__name__, exc)
         return False

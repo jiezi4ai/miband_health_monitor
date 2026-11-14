@@ -101,6 +101,8 @@ async def run_monitor(
     succeeded_sessions = 0
     last_failure: Optional[BaseException] = None
     history_synced = False
+    unresolved_drop_streak = 0
+    stale_bond_reset_done = False
 
     while True:
         active_deadline = (
@@ -117,11 +119,18 @@ async def run_monitor(
 
         attempt += 1
         client = make_client(device_id, auth_key_hex)
+        if hasattr(client, "_unresolved_drops"):
+            client._unresolved_drops = unresolved_drop_streak
+        if stale_bond_reset_done and hasattr(client, "_stale_bond_reset_attempted"):
+            client._stale_bond_reset_attempted = True
+            if hasattr(client, "_auto_enable_pairing_agent"):
+                client._auto_enable_pairing_agent = True
         failure: Optional[BaseException] = None
         was_authenticated = False
         try:
             await client.connect_and_authenticate(scan_timeout=scan_timeout)
             was_authenticated = True
+            unresolved_drop_streak = 0
             succeeded_sessions += 1
             consecutive_failures = 0
             if duration is not None and collection_deadline is None:
@@ -180,6 +189,12 @@ async def run_monitor(
             last_failure = exc
             logger.error("Session %d failed: %s", attempt, describe_ble_error(exc))
         finally:
+            if not was_authenticated:
+                if getattr(client, "_stale_bond_reset_attempted", False):
+                    stale_bond_reset_done = True
+                    unresolved_drop_streak = 0
+                elif isinstance(getattr(client, "_unresolved_drops", None), int):
+                    unresolved_drop_streak = client._unresolved_drops
             await client.disconnect()
 
         if not reconnect:

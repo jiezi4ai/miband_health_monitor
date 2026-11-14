@@ -74,10 +74,13 @@ class DiscoveryMixin:
         if not bluez.looks_like_mac(self.device_id):
             return None
 
+        self._reused_bluez_link = False
+
         # 1. If genuinely connected in BlueZ with services resolved, reuse the
         #    existing connection.
         connected_dev = await bluez.connected_device(self.device_id)
         if connected_dev is not None:
+            self._reused_bluez_link = True
             logger.info(
                 "Mi Band %s is already connected in BlueZ; reusing connection.",
                 self.device_id,
@@ -86,7 +89,13 @@ class DiscoveryMixin:
 
         # 2. Clean up a ghost connection (Connected without ServicesResolved);
         #    nothing is pending, so Disconnect() is safe here.
-        await bluez.disconnect_device(self.device_id)
+        if await bluez.disconnect_device(self.device_id):
+            logger.warning(
+                "Cleared residual ghost BlueZ connection for %s "
+                "(Connected=True, ServicesResolved=False) before reconnecting.",
+                self.device_id,
+            )
+            await asyncio.sleep(0.3)
 
         # 3. If properly paired/bonded in BlueZ, attempt fast direct connection.
         device = await bluez.paired_device(self.device_id)

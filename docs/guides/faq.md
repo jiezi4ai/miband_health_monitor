@@ -12,6 +12,8 @@
 | Linux 建链后 9–10 秒被断，`failed to discover services, device disconnected` | 手环未认证连接看门狗（首次要枚举 ~150 个 GATT 句柄）。客户端自动重试；先 `bluetoothctl trust <MAC>`。 |
 | 连上 40 秒左右就断，`UnknownObject ... doesn't exist` | 未 trust：BlueZ 在断链后移除设备对象。`bluetoothctl trust <MAC>`，必要时配对。 |
 | 连接时 BlueZ 日志 `No agent available for request type 2` | 手环发起 SMP 而系统无 agent：`MIBAND_BLUEZ_AGENT=1` 或手工 `bluetoothctl pair`。 |
+| Linux 每次连上约 **5 秒**就掉线，`ServicesResolved=False`（`RX/TX acl=0`） | BlueZ 保存了陈旧 `LTK` 导致空口 `LE Start Encryption` 超时（`0x08`）。连续命中 2 次时客户端会自动清缓存并拉起 agent 重建配对；也可手动 `bluetoothctl remove <MAC>` + `MIBAND_BLUEZ_AGENT=1` 重配。注意正常使用 Zepp Life 同步后无需清缓存。见 [validation/linux-ble-test-report.md](../validation/linux-ble-test-report.md)。 |
+| 日志显示 `already connected in BlueZ; reusing connection` 后不久掉线 | 上一次会话留下的半温/残留 `Connected=True` 状态。复用失败时客户端会自动 `disconnect_device()` 清零后重建；也可先运行 `bluetoothctl disconnect <MAC>` 再连接。 |
 | 每次都要等几十秒才连上 | 正常：无手机链路的手环每 40–60 秒才发一个脉冲。trust 后 BlueZ 缓存 GATT 表并自动回连。 |
 | Windows：`BleakError ... not found` / 连接被拒绝 | "设置 → 蓝牙和其他设备"确认适配器；删除设备旧记录；关手机蓝牙；用 `scan_ble.py` 核对地址。 |
 | Windows：`OSError: [WinError 193]` / 加载 `libecdh.so` 失败 | 当前版本会自动回退纯 Python；确认启动日志 `ECDH backend: python`。 |

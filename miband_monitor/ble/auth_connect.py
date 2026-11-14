@@ -60,7 +60,10 @@ class AuthConnectMixin:
         if (
             bluez.is_bluez_platform()
             and self._client_factory is self._bleak_client_class
-            and env_str(ENV_BLUEZ_AGENT, "").lower() in ("1", "true", "yes")
+            and (
+                env_str(ENV_BLUEZ_AGENT, "").lower() in ("1", "true", "yes")
+                or getattr(self, "_auto_enable_pairing_agent", False)
+            )
         ):
             if self._pairing_agent is None:
                 agent = bluez.BlueZPairingAgent(self.device_id)
@@ -71,6 +74,21 @@ class AuthConnectMixin:
 
         direct_device = await self._direct_connect_target()
         await self._open_client(direct_device, scan_timeout, connect_timeout)
+        try:
+            await self._prepare_and_authenticate(auth_timeout)
+        except Exception:
+            if getattr(self, "_reused_bluez_link", False) and self._bluez_link_mode():
+                logger.warning(
+                    "Session setup failed on reused BlueZ connection for %s; "
+                    "clearing residual BlueZ link before retry.",
+                    self.device_id,
+                )
+                await bluez.disconnect_device(self.device_id)
+                self._reused_bluez_link = False
+            raise
+
+    async def _prepare_and_authenticate(self, auth_timeout: float) -> None:
+        """Prepare MTU/notifications and run the chunked ECDH handshake."""
         if self._pairing_agent is not None:
             target_mac = getattr(self.client, "address", None) or self.device_id
             if bluez.looks_like_mac(target_mac):

@@ -156,6 +156,8 @@ async def wait_for_bluez_link(
                     attempts,
                 )
                 errors.append(f"dropped-unresolved-after-{elapsed:.1f}s")
+                if dropped_unresolved >= 2:
+                    return _finish("dropped-unresolved", info)
 
             if loop.time() >= deadline:
                 if info["connected"] and not grace_applied:

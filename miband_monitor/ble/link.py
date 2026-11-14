@@ -132,6 +132,34 @@ class LinkMixin:
             self.client = self._new_client(found_device, connect_timeout)
             await self._connect_with_transient_retry(self.client)
 
+    async def _recover_from_stale_bond(self) -> bool:
+        """Clear a bonded BlueZ object after consecutive pre-service drops and arm pairing."""
+        if getattr(self, "_stale_bond_reset_attempted", False):
+            return False
+        if await bluez.paired_device(self.device_id) is None:
+            return False
+        self._stale_bond_reset_attempted = True
+        logger.warning(
+            "Detected %d consecutive unresolved BlueZ drops on bonded device %s "
+            "(likely stale LTK); clearing cached BlueZ bond and enabling pairing "
+            "agent for clean re-pair.",
+            self._unresolved_drops,
+            self.device_id,
+        )
+        if not await bluez.remove_device(self.device_id):
+            logger.warning("Could not remove stale BlueZ bond for %s.", self.device_id)
+            return False
+        self._trusted_paths.clear()
+        self._reused_bluez_link = False
+        self._auto_enable_pairing_agent = True
+        if self._pairing_agent is None:
+            agent = bluez.BlueZPairingAgent(self.device_id)
+            if await agent.start():
+                self._pairing_agent = agent
+            else:
+                logger.debug("BlueZ pairing agent failed to start during stale-bond recovery.")
+        return True
+
     async def _open_bluez_link(self, direct_device, scan_timeout: float, connect_timeout: float) -> None:
         """Keep one BlueZ Connect armed until the band answers its next pulse.
 
@@ -159,7 +187,8 @@ class LinkMixin:
         # extra D-Bus roundtrip before arming Device1.Connect.
         await self._ensure_bluez_ready(direct_device)
         phases = ["direct", "scan"] if direct_device is not None else ["scan"]
-        for phase in phases:
+        while phases:
+            phase = phases.pop(0)
             if phase == "scan":
                 remaining = deadline - time.monotonic()
                 if remaining < 12.0:
@@ -203,14 +232,25 @@ class LinkMixin:
                     outcome["attempts"],
                     detail,
                 )
-                if outcome.get("dropped_unresolved", 0) > 0:
-                    logger.warning(
-                        "Link dropped before ServicesResolved (common when BlueZ holds a "
-                        "stale LTK after re-pairing elsewhere). Clear the cached bond "
-                        "with `bluetoothctl remove <MAC>` and reconnect with "
-                        "`MIBAND_BLUEZ_AGENT=1`."
-                    )
+                drops = int(outcome.get("dropped_unresolved", 0) or 0)
+                if drops > 0:
+                    self._unresolved_drops += drops
+                    if self._unresolved_drops >= 2 and await self._recover_from_stale_bond():
+                        direct_device = None
+                        device = None
+                        self._unresolved_drops = 0
+                        await asyncio.sleep(0.3)
+                        if "scan" not in phases and (deadline - time.monotonic()) >= 12.0:
+                            phases.append("scan")
+                    else:
+                        logger.warning(
+                            "Link dropped before ServicesResolved (common when BlueZ holds a "
+                            "stale LTK after re-pairing elsewhere). Clear the cached bond "
+                            "with `bluetoothctl remove <MAC>` and reconnect with "
+                            "`MIBAND_BLUEZ_AGENT=1`."
+                        )
                 continue
+            self._unresolved_drops = 0
             info = outcome["info"] or {}
             ble_device = bluez.make_ble_device(info) or device
             slice_budget = max(8.0, min(deadline - time.monotonic(), bluez.CONNECT_SLICE_TIMEOUT))
@@ -227,6 +267,10 @@ class LinkMixin:
                 with contextlib.suppress(Exception):
                     await client.disconnect()
                 self.client = None
+                if getattr(self, "_reused_bluez_link", False):
+                    await bluez.disconnect_device(self.device_id)
+                    self._reused_bluez_link = False
+                    direct_device = None
                 continue
             logger.info(
                 "BLE link established via BlueZ (%d connect request(s), %s).",

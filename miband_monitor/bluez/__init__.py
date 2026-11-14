@@ -24,6 +24,7 @@ from __future__ import annotations
 
 from .admin import (
     disconnect_device,
+    remove_device,
     set_adapter_pairable,
     set_device_trusted,
 )
@@ -113,6 +114,7 @@ __all__ = [
     "set_adapter_pairable",
     "set_device_trusted",
     "disconnect_device",
+    "remove_device",
     # link
     "wait_for_bluez_link",
     # pairing

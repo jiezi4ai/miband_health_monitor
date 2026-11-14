@@ -58,6 +58,7 @@
 | [validation/history-hardware.md](validation/history-hardware.md) | 血氧 / 活动 / 睡眠血氧 `0x26` 的真机验证清单与结果 |
 | [validation/linux-validation.md](validation/linux-validation.md) | Ubuntu/BlueZ 软件链路 + 真机验证报告（L1–L10） |
 | [validation/linux-ble-connect-findings.md](validation/linux-ble-connect-findings.md) | 2026-11-12 Linux 连接不稳定专项排查与根因清单 |
+| [validation/linux-ble-test-report.md](validation/linux-ble-test-report.md) | Test 1–4 复测结论、陈旧 LTK 根因、自愈逻辑与 Debug 手册 |
 | [investigations/sleep-fields.md](investigations/sleep-fields.md) | 睡眠三字节字段取证、与 Zepp Life / Gadgetbridge 的对照 |
 
 ## 工具与规范

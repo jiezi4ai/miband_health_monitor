@@ -134,6 +134,10 @@ class MiBand6Client(
         self._pairing_agent: Optional[bluez.BlueZPairingAgent] = None
         #: BlueZ device paths already marked Trusted in this session.
         self._trusted_paths: set[str] = set()
+        self._reused_bluez_link = False
+        self._unresolved_drops = 0
+        self._stale_bond_reset_attempted = False
+        self._auto_enable_pairing_agent = False
 
     # ------------------------------------------------------------- properties
     @property
