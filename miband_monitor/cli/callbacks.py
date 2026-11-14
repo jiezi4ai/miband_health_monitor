@@ -13,23 +13,37 @@ from typing import Optional
 from ..ble.client import StreamCallbacks
 from ..dashboard import TelemetryHub
 from ..storage import TelemetryStore
+from ..workout import WorkoutSession
+
+_WORKOUT_SSE_TIMELINE_LIMIT = 300
 
 
 def build_callbacks(
     store: TelemetryStore,
     hub: Optional[TelemetryHub] = None,
+    workout: Optional[WorkoutSession] = None,
 ) -> StreamCallbacks:
     """Return the StreamCallbacks used by the live monitor/demo runners."""
 
+    def _publish_workout_if_needed() -> None:
+        if workout is not None and hub is not None:
+            hub.publish_workout(workout.snapshot(timeline_limit=_WORKOUT_SSE_TIMELINE_LIMIT))
+
     def _on_heart_rate(bpm: int) -> None:
         store.record_heart_rate(bpm)
+        if workout is not None:
+            workout.record_heart_rate(bpm)
         if hub is not None:
             hub.publish_heart_rate(bpm)
+        _publish_workout_if_needed()
 
     def _on_steps(info: dict) -> None:
         store.record_steps(info)
+        if workout is not None:
+            workout.record_steps(info)
         if hub is not None:
             hub.publish_steps(info)
+        _publish_workout_if_needed()
 
     def _on_imu(info: dict) -> None:
         store.record_imu(info)

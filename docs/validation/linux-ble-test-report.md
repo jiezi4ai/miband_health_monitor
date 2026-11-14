@@ -1,138 +1,141 @@
-# Linux BLE 受控复测与陈旧 LTK 根因报告（Test 1–4 & 对照验证）
+**English** · [简体中文](linux-ble-test-report.zh-CN.md)
 
-> 本文在 [linux-ble-connect-findings.md](linux-ble-connect-findings.md)（2026-11-12）基础上，记录后续针对
-> **“BlueZ 约 5 秒 `ServicesResolved=False` 断链”**、**“正常同步是否会破坏配对”**、
-> **“残留 `Connected=True` 连接影响”** 以及 **“3 天历史数据校准与时区对齐”** 的完整受控真机实验（Test 1–4、Test 4 v2、Test 0、Test B），
-> 并沉淀固化后的自愈机制与未来可复用的 Debug 排障流程。
+# Linux BLE Controlled Retest and Stale-LTK Root Cause Report (Tests 1–4 & Control Verification)
+
+> Building on [linux-ble-connect-findings.md](linux-ble-connect-findings.md) (2026-11-12), this document records the follow-up
+> controlled real-device experiments (Test 1–4, Test 4 v2, Test 0, Test B) covering
+> **"BlueZ disconnects after about 5 seconds with `ServicesResolved=False`"**, **"does normal syncing break pairing"**,
+> **"the impact of residual `Connected=True` connections"**, and **"3-day history calibration and timezone alignment"**,
+> and distills the hardened self-healing mechanisms and a reusable Debug troubleshooting workflow.
 >
-> 设备地址统一脱敏为占位符 `C0:FF:EE:C0:FF:EE`。
+> Device addresses are uniformly redacted to the placeholder `C0:FF:EE:C0:FF:EE`.
 
 ---
 
-## 1. 核心结论速览（TL;DR）
+## 1. Key Conclusions (TL;DR)
 
-| # | 核心结论 | 证据来源 | 对使用与实现的指导 |
+| # | Key conclusion | Evidence source | Guidance for usage and implementation |
 |---|---|---|---|
-| 1 | **Test 1–3 的 5 秒反复掉线 = BlueZ 陈旧 `LTK`（Long Term Key）导致空口加密超时（HCI 错误码 `0x08`）** | Test 1–3 日志 + `btmon` `.btsnoop` | BlueZ 旧 `Device1` 对象缓存的 `LTK` 与手环不一致，内核发 `HCI LE Start Encryption` 后 5000 ms 被固件超时断链；此时 `ServicesResolved=False`、`RX/TX acl=0/0` |
-| 2 | **Test 4 成功不是因为清缓存本身，而是清掉失效配对并配合 `MIBAND_BLUEZ_AGENT=1` 重建了一套有效 `LTK`** | Test 4 v1（`Paired=yes, Bonded=yes, Trusted=yes`） | 仅当 `LTK` 已失配时才需要 `bluetoothctl remove` + 配对 agent 重建；正常状态切勿每次无条件删配对 |
-| 3 | **健康配对在手机 Zepp Life 正常同步并关蓝牙后依然完全可用，无需每次清缓存或开 `MIBAND_BLUEZ_AGENT=1`** | Pre-check + Test 0 + Test B | 保持 `Paired=yes / Bonded=yes / Trusted=yes / Connected=no` 直接运行即可：1 次 `direct connect` 直连（13.5–18 s），**0 WARNING / 0 ERROR**，稳跑 60 s + `--imu` |
-| 4 | **无条件每次先 `remove` 配对反而有害** | 对比实验与 BlueZ 机制分析 | 每次清缓存会丢失 GATT 服务表缓存与 `direct connect` 免扫描快路径，重新暴露在约 9–9.8 s 未认证枚举看门狗下；若手机未完全断链还会触发 `AuthenticationCanceled` |
-| 5 | **一次采集日志中出现多次 `Connect` 或重连是两层机制叠加**：① 待命等待 40–60 s 单脉冲的内核周期；② 会话断线后监督器自动重连 | Test 4 v2 vs Test B 对比 | `le-connection-abort-by-local` 是内核 40 s 发起周期重挂的正常日志；而会中途掉线多因链路被手机抢占、省电超时或复用了残留的 `Connected=True` 半温状态 |
-| 6 | **3 天历史数据与 Zepp Life 精确对齐** | Test 4 v2（`--sync-history 3 --band-tz Asia/Shanghai`） | 同步 4318 分钟无空洞；同日步数 `8353` vs `8353` 完全一致；`detect_sessions()` 外延逻辑 + `--band-tz` 修复双重偏移后，睡眠区间 `22:15 -> 06:28` 与 Zepp `22:24 -> 06:27` 高度吻合 |
+| 1 | **The 5-second repeated disconnects in Tests 1–3 = a stale BlueZ `LTK` (Long Term Key) causing an over-the-air encryption timeout (HCI error code `0x08`)** | Test 1–3 logs + `btmon` `.btsnoop` | The `LTK` cached in the old BlueZ `Device1` object does not match the band; after the kernel sends `HCI LE Start Encryption`, the firmware times out and drops the link after 5000 ms; at this point `ServicesResolved=False` and `RX/TX acl=0/0` |
+| 2 | **Test 4's success was not because of clearing the cache itself, but because it removed the invalid pairing and rebuilt a valid `LTK` with `MIBAND_BLUEZ_AGENT=1`** | Test 4 v1 (`Paired=yes, Bonded=yes, Trusted=yes`) | `bluetoothctl remove` + pairing-agent rebuild is needed only when the `LTK` is already out of sync; never unconditionally delete the pairing every time in a normal state |
+| 3 | **A healthy pairing remains fully usable after the phone's Zepp Life syncs normally and then turns Bluetooth off; there is no need to clear the cache or enable `MIBAND_BLUEZ_AGENT=1` every time** | Pre-check + Test 0 + Test B | Keep `Paired=yes / Bonded=yes / Trusted=yes / Connected=no` and run directly: 1 `direct connect` (13.5–18 s), **0 WARNING / 0 ERROR**, stable 60 s run + `--imu` |
+| 4 | **Unconditionally running `remove` first every time is actually harmful** | Control experiments and BlueZ mechanism analysis | Clearing the cache every time loses the GATT service table cache and the `direct connect` scan-free fast path, re-exposing the link to the ~9–9.8 s unauthenticated enumeration watchdog; if the phone is not fully disconnected yet, it can also trigger `AuthenticationCanceled` |
+| 5 | **Multiple `Connect`s or reconnects in one collection log come from two stacked layers**: ① the kernel period of waiting 40–60 s for a single pulse during standby; ② the supervisor automatically reconnecting after a session drops | Test 4 v2 vs Test B comparison | `le-connection-abort-by-local` is a normal log from re-arming on the kernel's 40 s initiation period; mid-session drops are mostly caused by the link being preempted by the phone, power-saving timeouts, or reuse of a residual half-open `Connected=True` state |
+| 6 | **3-day history data aligns exactly with Zepp Life** | Test 4 v2 (`--sync-history 3 --band-tz Asia/Shanghai`) | 4318 minutes synced with no gaps; same-day steps `8353` vs `8353` exactly identical; after `detect_sessions()`'s boundary-extension logic + `--band-tz` fixed the double offset, the sleep interval `22:15 -> 06:28` closely matches Zepp's `22:24 -> 06:27` |
 
 ---
 
-## 2. 受控实验总表（Test 1–4 与对照验证）
+## 2. Controlled Experiment Summary (Tests 1–4 and Control Verification)
 
-统一条件：手环与 Linux 主机间距 < 1 m，测试前手机确认同步完成并关闭手机蓝牙（除非表中另有说明）。
+Common conditions: band-to-Linux-host distance < 1 m; before testing, the phone is confirmed to have finished syncing and phone Bluetooth is turned off (unless otherwise noted in the table).
 
-| 编号 | 初始 BlueZ 状态 | 操作变量（缓存 / Agent） | CLI 目标 | 实测结果 | 关键指标与日志特征 |
+| ID | Initial BlueZ state | Operation variable (cache / agent) | CLI target | Measured result | Key metrics and log signatures |
 |---|---|---|---|---|---|
-| **Test 1** | 旧绑定存在（`Connected=no`） | 不清缓存，无 `MIBAND_BLUEZ_AGENT` | 60 s 基础采集 | **失败**（`EXIT_CODE=1`） | 多次 `Connected=True` 后约 `5.15–5.18 s` 断链，`ServicesResolved=False`，`hciconfig RX/TX acl = 0/0` |
-| **Test 2** | 旧绑定存在（同 Test 1） | 紧跟 Test 1，同条件复测 | 60 s 基础采集 | **失败**（`EXIT_CODE=1`） | 完全复现 `~5.16 s` 断链 + `ServicesResolved=False` |
-| **Test 3** | 旧绑定存在 + 开启 `btmon -w` | 同步抓取 HCI `.btsnoop` | 60 s 抓包复现 | **失败**（`EXIT_CODE=1`） | `btmon` 实锤：`LE Connection Complete` → `LE Data Length Change (251B)` → `HCI LE Start Encryption` → **5000 ms 后 `Encryption Change / Disconnect Complete: Connection Timeout (0x08)`** |
-| **Test 4 v1** | 先 `bluetoothctl remove` 清旧对象 | 启用 `MIBAND_BLUEZ_AGENT=1` | 60 s + `--imu` + `--sync-history 1` | **成功**（`EXIT_CODE=0`） | 触发全新 SMP 配对并写回 `Paired/Bonded/Trusted=True`，1440 条历史 + 1548 条 IMU，4 次 `[0x16]` 保活跑满 60 s |
-| **Test 4 v2** | 已带残留 **`Connected=yes`** 初态 | 无清缓存（沿用 Test 4 v1 绑定），`--band-tz Asia/Shanghai` | `--sync-history 3` + 60 s | **成功但中途重连**（`EXIT_CODE=0`） | 阶段 1 复用残留连接并同步 4318 条历史，但在 ~39 s 处断线；阶段 2 扫描超时；步数 `8353 = 8353`、睡眠 `22:15–06:28` 对齐 Zepp `22:24–06:27` |
-| **Pre-check** | 手机 Zepp Life 刚刚完成一次正常同步后关蓝牙 | 仅 `bluetoothctl info` 观测，**不动手环与缓存** | 状态核验 | **状态完好** | `Paired=yes, Bonded=yes, Trusted=yes, Connected=no` |
-| **Test 0** | 紧接 Pre-check（`Connected=no`） | **不清缓存、不开 `MIBAND_BLUEZ_AGENT`** | 20 s 冒烟 | **成功**（`EXIT_CODE=0`） | 1 次 `direct connect`（18 s）直连，**0 WARNING / 0 ERROR** |
-| **Test B** | 紧接 Test 0（`Connected=no`） | **不清缓存、不开 `MIBAND_BLUEZ_AGENT`** | 60 s + `--imu` 压力测试 | **成功**（`EXIT_CODE=0`） | 1 次 `direct connect`（13.5 s）直连，4 次 `[0x16]` 保活，IMU 达 `Seq 91`，**0 WARNING / 0 ERROR** |
-| **Post-reboot** | 系统重启后（`Paired/Bonded/Trusted=yes, Connected=no`） | **不清缓存、不开 `MIBAND_BLUEZ_AGENT`** | `--imu --sync-history 1 --band-tz Asia/Shanghai --export-csv` 60 s | **成功**（`EXIT_CODE=0`） | 1 次 `direct connect`（30.9 s）直连，1440 条历史 + 44 HR + 1548 IMU 零掉线，**0 WARNING / 0 ERROR** |
-| **Fresh Pair 1** | 先 `remove_device()` 彻底清零 BlueZ 对象（`not known to BlueZ yet`） | 模拟新机首次：`MIBAND_BLUEZ_AGENT=1` | `--imu --sync-history 1 --band-tz Asia/Shanghai --export-csv` 60 s | **成功**（`EXIT_CODE=0`） | 10.7 s 扫到脉冲，触发 `SERVICE_RESOLVE_GRACE` 10 s 宽限并 +1.8 s 解析成功，agent 自动授权 SMP，1440 条历史 + 45 HR + 1548 IMU，**0 WARNING / 0 ERROR** |
-| **Fresh Pair 2** | 紧接 Fresh Pair 1（新配对已固化） | **不再开 `MIBAND_BLUEZ_AGENT`** | 默认 20 s 复连验证 | **成功**（`EXIT_CODE=0`） | `--doctor` 显示 `paired=yes trusted=yes`，默认命令 1 次建链直通（15 HR + 1 steps），**0 WARNING / 0 ERROR** |
+| **Test 1** | Old bond exists (`Connected=no`) | No cache clearing, no `MIBAND_BLUEZ_AGENT` | 60 s basic collection | **Failure** (`EXIT_CODE=1`) | Disconnect after about `5.15–5.18 s` following several `Connected=True`; `ServicesResolved=False`, `hciconfig RX/TX acl = 0/0` |
+| **Test 2** | Old bond exists (same as Test 1) | Runs right after Test 1 under the same conditions | 60 s basic collection | **Failure** (`EXIT_CODE=1`) | Exactly reproduces the `~5.16 s` disconnect + `ServicesResolved=False` |
+| **Test 3** | Old bond exists + `btmon -w` enabled | Simultaneously capture HCI `.btsnoop` | 60 s capture reproduction | **Failure** (`EXIT_CODE=1`) | `btmon` confirms: `LE Connection Complete` → `LE Data Length Change (251B)` → `HCI LE Start Encryption` → **`Encryption Change / Disconnect Complete: Connection Timeout (0x08)` after 5000 ms** |
+| **Test 4 v1** | `bluetoothctl remove` first to clear the old object | `MIBAND_BLUEZ_AGENT=1` enabled | 60 s + `--imu` + `--sync-history 1` | **Success** (`EXIT_CODE=0`) | Triggers a brand-new SMP pairing and writes back `Paired/Bonded/Trusted=True`; 1440 history records + 1548 IMU records; 4 `[0x16]` keep-alives over the full 60 s |
+| **Test 4 v2** | Starts with residual **`Connected=yes`** | No cache clearing (reuses the Test 4 v1 bond), `--band-tz Asia/Shanghai` | `--sync-history 3` + 60 s | **Success but reconnected midway** (`EXIT_CODE=0`) | Phase 1 reused the residual connection and synced 4318 history records, but the link dropped at ~39 s; phase 2 scan timed out; steps `8353 = 8353`, sleep `22:15–06:28` aligned with Zepp `22:24–06:27` |
+| **Pre-check** | Phone's Zepp Life has just completed a normal sync, then Bluetooth off | Observation only via `bluetoothctl info`, **no changes to the band or cache** | State verification | **State intact** | `Paired=yes, Bonded=yes, Trusted=yes, Connected=no` |
+| **Test 0** | Immediately after Pre-check (`Connected=no`) | **No cache clearing, no `MIBAND_BLUEZ_AGENT`** | 20 s smoke test | **Success** (`EXIT_CODE=0`) | 1 `direct connect` (18 s) directly; **0 WARNING / 0 ERROR** |
+| **Test B** | Immediately after Test 0 (`Connected=no`) | **No cache clearing, no `MIBAND_BLUEZ_AGENT`** | 60 s + `--imu` stress test | **Success** (`EXIT_CODE=0`) | 1 `direct connect` (13.5 s); 4 `[0x16]` keep-alives; IMU reached `Seq 91`; **0 WARNING / 0 ERROR** |
+| **Post-reboot** | After a system reboot (`Paired/Bonded/Trusted=yes, Connected=no`) | **No cache clearing, no `MIBAND_BLUEZ_AGENT`** | `--imu --sync-history 1 --band-tz Asia/Shanghai --export-csv` 60 s | **Success** (`EXIT_CODE=0`) | 1 `direct connect` (30.9 s); 1440 history + 44 HR + 1548 IMU with zero drops; **0 WARNING / 0 ERROR** |
+| **Fresh Pair 1** | `remove_device()` first to fully clear the BlueZ object (`not known to BlueZ yet`) | Simulate a new device's first use: `MIBAND_BLUEZ_AGENT=1` | `--imu --sync-history 1 --band-tz Asia/Shanghai --export-csv` 60 s | **Success** (`EXIT_CODE=0`) | Pulse found in 10.7 s; triggered the `SERVICE_RESOLVE_GRACE` 10 s grace period and resolution succeeded +1.8 s later; the agent automatically authorized SMP; 1440 history + 45 HR + 1548 IMU; **0 WARNING / 0 ERROR** |
+| **Fresh Pair 2** | Immediately after Fresh Pair 1 (the new pairing is already persisted) | **No longer enables `MIBAND_BLUEZ_AGENT`** | Default 20 s reconnect verification | **Success** (`EXIT_CODE=0`) | `--doctor` shows `paired=yes trusted=yes`; the default command establishes the link in 1 attempt (15 HR + 1 steps); **0 WARNING / 0 ERROR** |
 
 ---
 
-## 3. 机制拆解：为什么出现“多个 Error/Warning 与多次连接”
+## 3. Mechanism Analysis: Why "Multiple Errors/Warnings and Multiple Connections" Occur
 
-### 3.1 `btmon` 还原的 ~5 秒断链真相（Test 1–3）
+### 3.1 The truth behind the ~5-second disconnect recovered by `btmon` (Tests 1–3)
 
-当 BlueZ 中保存了旧配对记录，但手环曾被其他主机/App 刷新过配对密钥或清除过绑定，Linux 与手环的握手时序如下：
+When BlueZ holds an old pairing record but the band's pairing key has been refreshed by another host/App or the bond has been cleared, the handshake sequence between Linux and the band is as follows:
 
-1. 内核收到脉冲（或发起 `Device1.Connect`），物理层建链成功（`LE Connection Complete`）；
-2. 控制器完成参数协商：`LE Data Length Change`（251 字节）与 `LE Read Remote Used Features` 均正常返回；
-3. 由于 BlueZ 认为该设备 `Paired=True`，Linux 内核主动向控制器下发 `HCI LE Start Encryption`，并传入 BlueZ 磁盘中**陈旧的 `LTK`**；
-4. 手环固件用自己当前的密钥无法解密/认证该链路加密请求，既不触发上层 GATT 服务发现（因此 `ServicesResolved` 始终为 `False`，`acl` 数据包收发为 `0`），也在约 **5000 ms** 后直接超时断链（`Encryption Change: Connection Timeout (0x08)`）。
+1. The kernel receives a pulse (or initiates `Device1.Connect`), and the physical link is established successfully (`LE Connection Complete`);
+2. The controller completes parameter negotiation: `LE Data Length Change` (251 bytes) and `LE Read Remote Used Features` both return normally;
+3. Because BlueZ considers the device `Paired=True`, the Linux kernel proactively sends `HCI LE Start Encryption` to the controller, passing in the **stale `LTK`** from BlueZ's on-disk store;
+4. The band firmware cannot decrypt/authenticate this link-encryption request with its current key, so it neither triggers upper-layer GATT service discovery (hence `ServicesResolved` stays `False` and `acl` packet traffic is `0`) nor responds, and it simply times out and drops the link after about **5000 ms** (`Encryption Change: Connection Timeout (0x08)`).
 
-> 区分点：**陈旧 LTK 断链 ≈ 5.1 s 且 `RX/TX acl = 0/0`**；而**首次连接未认证看门狗 ≈ 9.0–9.8 s 且伴随大量 GATT 枚举 `acl > 0`（日志 `failed to discover services`）**。
+> Distinguishing point: **stale-LTK disconnect ≈ 5.1 s with `RX/TX acl = 0/0`**; whereas **the first-connection unauthenticated watchdog ≈ 9.0–9.8 s and is accompanied by heavy GATT enumeration `acl > 0` (log `failed to discover services`)**.
 
-### 3.2 为什么日志里会有多次 `Connect` 和重连
+### 3.2 Why the Log Shows Multiple `Connect`s and Reconnects
 
-运行主程序（[cli/runner.py](../../miband_monitor/cli/runner.py) 中的 `run_monitor()`）时，“一次执行出现多轮日志”来自两个正常层级：
+When running the main program (`run_monitor()` in [cli/runner.py](../../miband_monitor/cli/runner.py)), "multiple rounds of logs in one execution" come from two normal layers:
 
-1. **单次建链窗口内的脉冲等待（正常）**：
-   无手机连接的手环每 **40–60 秒**才发出 1 个可连接脉冲。Linux 内核单次 `LE Create Connection` 约 40 秒超时会报 `le-connection-abort-by-local`。`wait_for_bluez_link()` 会在 ~150 ms 后原地重挂等待下一个脉冲，并在 `direct`（49.5 s）未能命中时进入 `scan`（≥ 70 s）。这些期间的 INFO/WARNING 重试是预期设计，不代表失败。
-2. **会话监督器的断线重连（正常容错）**：
-   一旦某段会话在运行中途断链（如 Test 4 v2 阶段 1 复用了先前残留的 `Connected=True` 状态导致 ~39 s 断链，或手环省电/手机干扰断链），`run_monitor()` 会在指数退避（或刚断链时的 `0.3 s` 快速重连窗口）后新建下一轮会话继续完成 `--duration`。
+1. **Pulse waiting within a single link-establishment window (normal)**:
+   A band with no phone connection emits only 1 connectable pulse every **40–60 seconds**. One Linux-kernel `LE Create Connection` times out after about 40 seconds and reports `le-connection-abort-by-local`. `wait_for_bluez_link()` re-arms on the spot after ~150 ms to wait for the next pulse, and enters `scan` (≥ 70 s) when `direct` (49.5 s) fails to hit. The INFO/WARNING retries during these periods are by design and do not indicate failure.
+2. **Session supervisor reconnect on link loss (normal fault tolerance)**:
+   If a session drops mid-run (e.g. Test 4 v2 phase 1 reused a residual `Connected=True` state and dropped at ~39 s, or the band's power saving/phone interference causes a drop), `run_monitor()` starts the next session after exponential backoff (or a `0.3 s` fast reconnect window immediately after the drop) to continue completing `--duration`.
 
-### 3.3 为什么不应“每次启动前无条件清空 BlueZ 缓存”
+### 3.3 Why You Should Not "Unconditionally Clear the BlueZ Cache Before Every Start"
 
-1. **正常使用手机同步并不会破坏 Linux 绑定**：Test 0 与 Test B 已实锤验证，在 Zepp Life 正常同步完并关闭手机蓝牙后，Linux 侧原有 `Paired/Bonded/Trusted` 密钥依然有效，无需重新配对。
-2. **保留缓存带来两项关键收益**：`direct connect` 可直接对已绑定设备发起建链而不依赖扫到脉冲；同时 BlueZ 已缓存 ~150 个 GATT 句柄，避免每次重新跑全量服务发现而撞上 ~9 s 看门狗。
-3. **误删的代价**：如果手环侧仍与手机保有有效绑定且手机蓝牙未断开，删掉 BlueZ 缓存并强行发起配对反而会在空口被手环拒绝（`AuthenticationCanceled`）。
+1. **Normal phone syncing does not break the Linux bond**: Test 0 and Test B have verified conclusively that after Zepp Life finishes a normal sync and phone Bluetooth is turned off, the existing `Paired/Bonded/Trusted` keys on the Linux side remain valid and no re-pairing is needed.
+2. **Keeping the cache provides two key benefits**: `direct connect` can initiate a link to an already-bonded device directly without relying on catching a pulse; and BlueZ has ~150 GATT handles cached, avoiding a full service discovery every time and the ~9 s watchdog.
+3. **The cost of mistakenly deleting it**: if the band still has a valid bond with the phone and the phone's Bluetooth is not disconnected, deleting the BlueZ cache and forcing a pairing will instead be rejected over the air by the band (`AuthenticationCanceled`).
 
 ---
 
-## 4. 代码层固化的自愈与保护逻辑
+## 4. Self-Healing and Protection Logic Hardened in Code
 
-针对 Test 1–4 与 Test 4 v2 暴露出的两类异常前驱状态，[bluez/](../../miband_monitor/bluez/__init__.py) 与 [ble/](../../miband_monitor/ble/client.py) 层已内置以下分级自愈机制（**仅针对已证实的故障证据触发，不干扰健康配对**）：
+In response to the two types of abnormal precursor states exposed by Tests 1–4 and Test 4 v2, the [bluez/](../../miband_monitor/bluez/__init__.py) and [ble/](../../miband_monitor/ble/client.py) layers have built in the following tiered self-healing mechanisms (**triggered only by confirmed failure evidence and never interfering with healthy pairings**):
 
-| 触发条件 | 代码位置 | 自动动作 | 保护边界 |
+| Trigger condition | Code location | Automatic action | Protection boundary |
 |---|---|---|---|
-| 启动直连检测时发现 **`Connected=True` 且 `ServicesResolved=False`**（幽灵残留） | [ble/discovery.py](../../miband_monitor/ble/discovery.py) `_direct_connect_target()` | 调用 `bluez.disconnect_device()` 清理幽灵链路，打印 `WARNING` 并等待 0.3 s 后从干净状态续连 | **只清理已确认 `Connected=True` 的现成对象**，绝不对“挂起中的 `Connect`”发 `Disconnect`，防止 BARROT 适配器假死 |
-| 复用 **`Connected=True` 且 `ServicesResolved=True`** 残留连接时，Bleak 交接失败或首轮 GATT/ECDH 握手失败 | [ble/link.py](../../miband_monitor/ble/link.py) / [ble/auth_connect.py](../../miband_monitor/ble/auth_connect.py) | 打 `WARNING` 并调用 `bluez.disconnect_device()` 清除半温/失效的旧连接，下轮回到干净的 `Connected=no` 重建 | 仅当 `_reused_bluez_link=True` 时执行，不影响新连脉冲 |
-| 单轮或跨 `run_monitor` 重试**连续命中 `dropped_unresolved >= 2`**（在 `ServicesResolved=True` 前就约 5 s 掉线），且确认设备当前处于 `Paired=True` | [bluez/link.py](../../miband_monitor/bluez/link.py) + [ble/link.py](../../miband_monitor/ble/link.py) `_recover_from_stale_bond()` + [cli/runner.py](../../miband_monitor/cli/runner.py) | ① `wait_for_bluez_link()` 在第 2 次未解析掉线后提前返回 `"dropped-unresolved"` 避免干等；② 调用 `bluez.remove_device()` 移除陈旧 `Device1` 对象；③ 自动拉起 `BlueZPairingAgent` 并重置 `_trusted_paths`，在剩余预算或下次重试中完成干净重配 | ① **必须 `paired_device()` 非空**（未配对设备不误删）；② 单次运行期 `_stale_bond_reset_attempted` **只触发一次**，防止手机抢链时死循环删缓存 |
+| At startup direct-connect detection, **`Connected=True` and `ServicesResolved=False`** is found (ghost residue) | [ble/discovery.py](../../miband_monitor/ble/discovery.py) `_direct_connect_target()` | Calls `bluez.disconnect_device()` to clean up the ghost link, prints `WARNING`, waits 0.3 s, then continues connecting from a clean state | **Only cleans up existing objects confirmed `Connected=True`**; never sends `Disconnect` to a "pending `Connect`", preventing the BARROT adapter from stalling |
+| When reusing a residual **`Connected=True` and `ServicesResolved=True`" connection, the Bleak handover fails or the first GATT/ECDH handshake fails | [ble/link.py](../../miband_monitor/ble/link.py) / [ble/auth_connect.py](../../miband_monitor/ble/auth_connect.py) | Prints `WARNING` and calls `bluez.disconnect_device()` to clear the stale half-open/invalid old connection; the next round rebuilds from a clean `Connected=no` | Executed only when `_reused_bluez_link=True`; does not affect new connection pulses |
+| A single round or retries across `run_monitor` **hit `dropped_unresolved >= 2` consecutively** (drop at about 5 s before `ServicesResolved=True`), and the device is confirmed currently `Paired=True` | [bluez/link.py](../../miband_monitor/bluez/link.py) + [ble/link.py](../../miband_monitor/ble/link.py) `_recover_from_stale_bond()` + [cli/runner.py](../../miband_monitor/cli/runner.py) | ① `wait_for_bluez_link()` returns `"dropped-unresolved"` early after the 2nd unresolved drop, avoiding a pointless wait; ② calls `bluez.remove_device()` to remove the stale `Device1` object; ③ automatically launches `BlueZPairingAgent` and resets `_trusted_paths` to complete a clean re-pairing within the remaining budget or the next retry | ① **`paired_device()` must be non-empty** (unpaired devices are not mistakenly deleted); ② `_stale_bond_reset_attempted` **triggers only once** per run, preventing an infinite loop of cache deletion while the phone competes for the link |
 
 ---
 
-## 5. 未来常见问题与系统化 Debug 思路
+## 5. Future FAQ and Systematic Debug Approach
 
-### 5.1 每次动手排查前的“状态基线检查”（10 秒完成）
+### 5.1 "State Baseline Check" Before Every Investigation (takes 10 seconds)
 
-在怀疑代码或蓝牙栈有问题前，先运行以下三条命令确立事实基线：
+Before suspecting the code or the Bluetooth stack, run the following three commands to establish a factual baseline:
 
 ```bash
-# 1. 确认手机蓝牙已关闭 / Zepp Life 未在后台占链，并跑环境自检
+# 1. Confirm phone Bluetooth is off / Zepp Life is not holding the link in the background, and run the environment self-check
 python3 miband_client.py --doctor
 
-# 2. 查看 BlueZ 对象四状态（关注 Paired / Bonded / Trusted / Connected）
+# 2. View the four BlueZ object states (focus on Paired / Bonded / Trusted / Connected)
 bluetoothctl info C0:FF:EE:C0:FF:EE | grep -E "Paired|Bonded|Trusted|Connected|ServicesResolved"
 
-# 3. 检查 USB 适配器电源/控制器在线与 HCI 计数基线
+# 3. Check the USB adapter power/controller online state and the HCI counter baseline
 hciconfig hci0
 ```
 
-健康等待状态的预期输出：
-- `Paired: yes`、`Bonded: yes`、`Trusted: yes`、`Connected: no`（若上一进程异常强杀留下了 `Connected: yes`，先观察重连是否自愈，或 `bluetoothctl disconnect C0:FF:EE:C0:FF:EE`）。
+Expected output for a healthy standby state:
+- `Paired: yes`, `Bonded: yes`, `Trusted: yes`, `Connected: no` (if a previous process was force-killed and left `Connected: yes`, first see whether the reconnect self-heals, or run `bluetoothctl disconnect C0:FF:EE:C0:FF:EE`).
 
-### 5.2 按现象快速分型与排障路径
+### 5.2 Rapid Triage by Symptom and Troubleshooting Path
 
-| 现象 / 日志关键字 | 根因判断 | 确认方法 | 解决动作 |
+| Symptom / log keyword | Root-cause judgment | How to confirm | Action |
 |---|---|---|---|
-| 频繁 `dropped-unresolved-after-5.xs`、`ServicesResolved=False`，`RX/TX acl=0/0` | **BlueZ 陈旧 LTK**（密钥与手环不同步） | 自愈日志是否触发 `clearing cached BlueZ bond`；或 `btmon` 看 `LE Start Encryption` 后是否回 `0x08` | **自愈未生效或仅单次尝试时**：手动 `bluetoothctl remove C0:FF:EE:C0:FF:EE`，再用 `MIBAND_BLUEZ_AGENT=1 python3 miband_client.py 30` 重建配对 |
-| 建链后 ~9–9.8 s 断链，`failed to discover services, device disconnected`（`acl > 0`） | **首次 GATT 全量枚举超时**，触发手环未认证看门狗 | `Paired: no` 或刚清过缓存首次枚举 | 靠近适配器并保持手环亮屏重跑一次；一旦出现 `Trusted=yes` 与缓存建立即恢复 |
-| 扫描 25 s 无**任何**周边 BLE 设备上报、`Opcode 0x2041/0x2042 failed: -112`、`Δevents == Δcommands` | **USB 适配器射频扫描状态机假死**（常见于 BARROT `33fa:0012`） | `hciconfig hci0` 两次采样对比 `events - commands == 0` 且手机都扫不到其他设备 | 必须物理/USB 级复位：`sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth`（`bluetoothctl power off/on` 无效） |
-| 能扫到周围其他 BLE 设备，但 90 s 内就是扫不到手环 | ① 手机仍连着手环；② 手环重启后丢了 Zepp 下发的“公共广播”状态 | 打开手机确认手环蓝牙图标状态，或用 Zepp Life 看是否直连中 | 用手机 Zepp Life 完整同步一次手环，确认退出后**关闭手机蓝牙**再试 |
-| `MIBAND_BLUEZ_AGENT=1` 期间建链报错 `AuthenticationCanceled`（`0x05`） | 手环内部仍锁死在手机/原绑定端，或配对时机冲突 | `btmon` / `journalctl -u bluetooth` 见 `AuthenticationCanceled` | 确认手机蓝牙完全关闭；必要时重启手环蓝牙或在 Zepp Life 解绑重绑 |
-| `already connected in BlueZ; reusing connection` 后紧接着断链或卡认证 | 上一进程强杀/挂死遗留了半温 `Connected=True` | `bluetoothctl info C0:FF:EE:C0:FF:EE` 启动前已显示 `Connected: yes` | 代码在复用失败后会自动 `disconnect_device()` 回退；也可先 `bluetoothctl disconnect C0:FF:EE:C0:FF:EE` 清零再测 |
-| 历史报告 / 睡眠时间整体差 8 小时，或当日步数跨午夜切分不对 | `BAND_TZ` 未与手环本地时区一致 | `--sync-history` / `sleep_analysis.py` 未传 `--band-tz` | 传入 `--band-tz Asia/Shanghai`（或 `.env` 设置 `BAND_TZ=Asia/Shanghai`），使入库与报表口径统一 |
+| Frequent `dropped-unresolved-after-5.xs`, `ServicesResolved=False`, `RX/TX acl=0/0` | **Stale BlueZ LTK** (key out of sync with the band) | Whether the self-healing log triggers `clearing cached BlueZ bond`; or check with `btmon` whether `0x08` is returned after `LE Start Encryption` | **If self-healing did not take effect or only tried once**: manually run `bluetoothctl remove C0:FF:EE:C0:FF:EE`, then `MIBAND_BLUEZ_AGENT=1 python3 miband_client.py 30` to rebuild the pairing |
+| ~9–9.8 s disconnect after link establishment, `failed to discover services, device disconnected` (`acl > 0`) | **First full GATT enumeration timeout**, triggering the band's unauthenticated watchdog | `Paired: no` or the first enumeration right after clearing the cache | Move closer to the adapter and keep the band screen on, then rerun once; recovery follows once `Trusted=yes` and the cache are established |
+| Scan for 25 s with **no** surrounding BLE device reported, `Opcode 0x2041/0x2042 failed: -112`, `Δevents == Δcommands` | **USB adapter radio scan state machine stalled** (common on BARROT `33fa:0012`) | Compare two `hciconfig hci0` samples: `events - commands == 0`, and the phone cannot scan any other device either | A physical/USB-level reset is required: `sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth` (`bluetoothctl power off/on` is ineffective) |
+| Can scan surrounding other BLE devices, but the band cannot be scanned within 90 s | ① The phone is still connected to the band; ② the band lost the "public advertising" state set by Zepp after a reboot | Open the phone and confirm the band's Bluetooth icon state, or check with Zepp Life whether it is directly connected | Run a full sync once with Zepp Life on the phone, make sure to exit and then **turn off phone Bluetooth** and retry |
+| Link-establishment error `AuthenticationCanceled` (`0x05`) while `MIBAND_BLUEZ_AGENT=1` | The band is still locked to the phone/original binding, or the pairing timing conflicts | `btmon` / `journalctl -u bluetooth` shows `AuthenticationCanceled` | Confirm phone Bluetooth is fully off; restart the band's Bluetooth or unbind/rebind in Zepp Life if necessary |
+| Link drops or authentication hangs right after `already connected in BlueZ; reusing connection` | A previous process was force-killed or hung and left a half-open `Connected=True` | `bluetoothctl info C0:FF:EE:C0:FF:EE` already shows `Connected: yes` before startup | The code automatically falls back to `disconnect_device()` after a failed reuse; you can also run `bluetoothctl disconnect C0:FF:EE:C0:FF:EE` first to reset before testing |
+| History report / sleep times are off by 8 hours overall, or the day's step count is split incorrectly across midnight | `BAND_TZ` does not match the band's local timezone | `--sync-history` / `sleep_analysis.py` did not receive `--band-tz` | Pass `--band-tz Asia/Shanghai` (or set `BAND_TZ=Asia/Shanghai` in `.env`) so that storage and reporting use the same timezone convention |
 
-### 5.3 需要深度抓包取证时的标准操作
+### 5.3 Standard Procedure for In-Depth Packet-Capture Forensics
 
-若遇到新固件或未知 D-Bus/HCI 异常，按以下无侵入流程收集完整证据（避免直接把原始 `.btsnoop` 或真实地址外发）：
+For new firmware or unknown D-Bus/HCI anomalies, collect complete evidence with the following non-intrusive procedure (avoid sending raw `.btsnoop` files or real addresses externally):
 
-1. **终端 1 启动内核/HCI 抓包**（从 `Connected=no` 干净初态开始）：
+1. **Terminal 1 starts the kernel/HCI capture** (starting from a clean `Connected=no` state):
    ```bash
    sudo btmon -w /tmp/miband_btmon.btsnoop
    ```
-2. **终端 2 执行复现**：
+2. **Terminal 2 runs the reproduction**:
    ```bash
    python3 miband_client.py 30 --log-level DEBUG 2>&1 | tee /tmp/miband_run.log
    ```
-3. **离线提取关键 HCI 事件对照时间戳**：
+3. **Extract key HCI events offline and compare timestamps**:
    ```bash
    btmon -r /tmp/miband_btmon.btsnoop | grep -E "LE Connection|Start Encryption|Encryption Change|Disconnect Complete|Pairing|LTK"
    ```
-4. **提交或归档前运行仓库脱敏校验**：
+4. **Run the repository redaction check before submitting or archiving**:
    ```bash
    python3 tools/check_privacy.py
    ```

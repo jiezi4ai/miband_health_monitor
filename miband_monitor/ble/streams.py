@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import time
 from typing import Callable, Optional
 
 from .. import bluez
@@ -60,21 +61,56 @@ class StreamMixin:
         await self._write_gatt(UUID_CHAR_HR_CONTROL, b"\x15\x01\x01", response=False)
 
         self._hr_active = True
+        self._last_hr_notify_at = time.monotonic()
+        self._hr_soft_rearm_count = 0
         self._keepalive_task = asyncio.create_task(self._hr_keepalive_loop())
         logger.info("Continuous heart rate monitoring active!")
 
     async def _hr_keepalive_loop(self) -> None:
-        """Ping the heart-rate control point every 12 s; abort after 2 failures."""
+        """Ping 0x16 on keep-alive ticks and watch 0x2A37 for notification silence."""
         consecutive_failures = 0
+        interval = getattr(self, "keepalive_interval", 12.0)
+        soft_limit = getattr(self, "hr_silence_soft_seconds", 24.0)
+        hard_limit = getattr(self, "hr_silence_hard_seconds", 48.0)
+        rearm_max = getattr(self, "hr_soft_rearm_max", 2)
         try:
             while True:
-                await asyncio.sleep(12)
-                if self.client is None:
+                await asyncio.sleep(interval)
+                if self.client is None or getattr(self, "_closing", False):
                     return
                 logger.debug("Pinging heart rate monitor keep-alive [0x16]...")
                 try:
                     await self._write_gatt(UUID_CHAR_HR_CONTROL, b"\x16", response=False)
                     consecutive_failures = 0
+                    last_notify = getattr(self, "_last_hr_notify_at", None)
+                    if last_notify is not None:
+                        silence = time.monotonic() - last_notify
+                        if hard_limit > 0 and silence >= hard_limit:
+                            logger.error(
+                                "Heart-rate stream silent for %.1f s (>= %.1f s after %d soft re-arm(s)); "
+                                "treating link as stalled.",
+                                silence,
+                                hard_limit,
+                                getattr(self, "_hr_soft_rearm_count", 0),
+                            )
+                            self._disconnected.set()
+                            return
+                        if (
+                            soft_limit > 0
+                            and silence >= soft_limit
+                            and getattr(self, "_hr_soft_rearm_count", 0) < rearm_max
+                        ):
+                            self._hr_soft_rearm_count = getattr(self, "_hr_soft_rearm_count", 0) + 1
+                            logger.warning(
+                                "Heart-rate stream silent for %.1f s; sending soft re-arm [0x15 0x01 0x01] "
+                                "(attempt %d/%d).",
+                                silence,
+                                self._hr_soft_rearm_count,
+                                rearm_max,
+                            )
+                            await self._write_gatt(
+                                UUID_CHAR_HR_CONTROL, b"\x15\x01\x01", response=False
+                            )
                 except Exception as exc:
                     consecutive_failures += 1
                     is_fatal = (
@@ -111,6 +147,8 @@ class StreamMixin:
             except Exception as exc:
                 logger.debug("Error while stopping heart-rate notify: %s", exc)
         self._hr_active = False
+        self._last_hr_notify_at = None
+        self._hr_soft_rearm_count = 0
 
     # ------------------------------------------------------------------- steps
     async def start_steps_stream(self, callback: Optional[Callable[[dict], None]] = None) -> None:

@@ -1,0 +1,50 @@
+"""Constants and configuration defaults for the workout domain package."""
+
+from __future__ import annotations
+
+from ..config.defaults import (
+    DEFAULT_BATTERY_POLL_SECONDS,
+    DEFAULT_WORKOUT_AGE,
+    DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS,
+    DEFAULT_WORKOUT_HR_MAX,
+    DEFAULT_WORKOUT_SEX,
+    DEFAULT_WORKOUT_WEIGHT_KG,
+)
+from ..config.health import (
+    DEFAULT_HR_SMOOTHING_WINDOW,
+    HR_MAX,
+    HR_MIN,
+    HR_UNAVAILABLE,
+    WORKOUT_HR_ZONES,
+)
+
+STATE_STREAMING = "streaming"
+STATE_RECONNECTING = "reconnecting"
+STATE_GAP_FILLING = "gap_filling"
+STATE_FINISHED = "finished"
+
+WORKOUT_STATES = (
+    STATE_STREAMING,
+    STATE_RECONNECTING,
+    STATE_GAP_FILLING,
+    STATE_FINISHED,
+)
+
+__all__ = [
+    "DEFAULT_BATTERY_POLL_SECONDS",
+    "DEFAULT_HR_SMOOTHING_WINDOW",
+    "DEFAULT_WORKOUT_AGE",
+    "DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS",
+    "DEFAULT_WORKOUT_HR_MAX",
+    "DEFAULT_WORKOUT_SEX",
+    "DEFAULT_WORKOUT_WEIGHT_KG",
+    "HR_MAX",
+    "HR_MIN",
+    "HR_UNAVAILABLE",
+    "STATE_FINISHED",
+    "STATE_GAP_FILLING",
+    "STATE_RECONNECTING",
+    "STATE_STREAMING",
+    "WORKOUT_HR_ZONES",
+    "WORKOUT_STATES",
+]

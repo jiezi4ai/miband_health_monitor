@@ -24,11 +24,13 @@ ASSETS_DIR = package_path("dashboard", "assets")
 PAGE_TEMPLATE_NAME = "dashboard.html"
 CSS_ASSET_NAME = "dashboard.css"
 SCRIPT_ASSET_NAME = "dashboard.js"
+WORKOUT_SCRIPT_ASSET_NAME = "workout.js"
 
 #: Markers in the HTML shell that the assets replace. They are deliberately
 #: unique strings so composition is a single pass with no parser dependency.
 CSS_TOKEN = "__DASHBOARD_CSS__"
 SCRIPT_TOKEN = "__DASHBOARD_SCRIPT__"
+WORKOUT_SCRIPT_TOKEN = "__WORKOUT_SCRIPT__"
 
 #: Minimal page served when the dashboard assets cannot be read. It must keep
 #: the JSON/SSE API discoverable, matching the historical fallback behaviour.
@@ -47,19 +49,24 @@ _FALLBACK_INDEX = FALLBACK_INDEX
 
 
 @lru_cache(maxsize=1)
-def _load_assets() -> Tuple[str, str, str]:
-    """Read the page shell and inline assets once (text, CSS, JavaScript)."""
+def _load_assets() -> Tuple[str, str, str, str]:
+    """Read the page shell and inline assets once (text, CSS, JS, workout JS)."""
     base = Path(ASSETS_DIR)
     shell = (base / PAGE_TEMPLATE_NAME).read_text(encoding="utf-8")
     css = (base / CSS_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
     script = (base / SCRIPT_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
-    return shell, css, script
+    workout_script = (base / WORKOUT_SCRIPT_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
+    return shell, css, script, workout_script
 
 
 def compose_page() -> str:
     """Return the single-file dashboard HTML (CSS/JS inserted inline)."""
-    shell, css, script = _load_assets()
-    return shell.replace(CSS_TOKEN, css).replace(SCRIPT_TOKEN, script)
+    shell, css, script, workout_script = _load_assets()
+    return (
+        shell.replace(CSS_TOKEN, css)
+        .replace(WORKOUT_SCRIPT_TOKEN, workout_script)
+        .replace(SCRIPT_TOKEN, script)
+    )
 
 
 @lru_cache(maxsize=1)
@@ -82,6 +89,8 @@ __all__ = [
     "PAGE_TEMPLATE_NAME",
     "SCRIPT_ASSET_NAME",
     "SCRIPT_TOKEN",
+    "WORKOUT_SCRIPT_ASSET_NAME",
+    "WORKOUT_SCRIPT_TOKEN",
     "_FALLBACK_INDEX",
     "compose_page",
     "fallback_index_bytes",

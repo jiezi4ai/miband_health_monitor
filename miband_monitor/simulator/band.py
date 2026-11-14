@@ -27,6 +27,7 @@ import time
 from typing import Callable, Optional
 
 from miband_monitor.ble import (
+    UUID_CHAR_BATTERY_LEVEL,
     UUID_CHAR_CHUNKED_WRITE,
     UUID_CHAR_HR_CONTROL,
     UUID_CHAR_RAW_SENSOR_CONTROL,
@@ -67,6 +68,11 @@ class SimulatedBand(HistoryMixin, AuthMixin, StreamMixin):
         history_activity: Optional[list[dict]] = None,
         history_spo2_sleep: Optional[list[dict]] = None,
         drop_history_packets: tuple[int, ...] = (),
+        continuous_interval: Optional[float] = None,
+        freeze_hr_after: Optional[int] = None,
+        freeze_on_connections: Optional[tuple[int, ...]] = None,
+        resurrect_on_rearm: bool = False,
+        battery_level: Optional[int] = 85,
     ) -> None:
         if len(auth_key) != 16:
             raise ValueError("auth_key must be 16 bytes")
@@ -135,6 +141,14 @@ class SimulatedBand(HistoryMixin, AuthMixin, StreamMixin):
         self._fail_this_auth = fail_auth
         self.drop_auth_seqs = set(drop_auth_seqs)
         self.disconnect_after = disconnect_after
+        self.continuous_interval = continuous_interval
+        self.freeze_hr_after = freeze_hr_after
+        self.freeze_on_connections = (
+            set(freeze_on_connections) if freeze_on_connections is not None else None
+        )
+        self.resurrect_on_rearm = resurrect_on_rearm
+        self.battery_level = battery_level
+        self.hr_control_writes: list[bytes] = []
 
         self.connect_count = 0
         self.authenticated = False
@@ -146,6 +160,9 @@ class SimulatedBand(HistoryMixin, AuthMixin, StreamMixin):
         self._write_transactions: dict[int, list] = {}
         self._timers: list[asyncio.TimerHandle] = []
         self._hr_started = False
+        self._hr_frozen = False
+        self._hr_emitted_in_conn = 0
+        self._hr_tick_index = 0
         self._sensor_started = False
         self._steps_scheduled = False
         self._imu_scheduled = False
@@ -181,6 +198,9 @@ class SimulatedBand(HistoryMixin, AuthMixin, StreamMixin):
         self._session_key = None
         self._write_transactions.clear()
         self._hr_started = False
+        self._hr_frozen = False
+        self._hr_emitted_in_conn = 0
+        self._hr_tick_index = 0
         self._sensor_started = False
         self._steps_scheduled = False
         self._imu_scheduled = False
@@ -209,6 +229,7 @@ class SimulatedBand(HistoryMixin, AuthMixin, StreamMixin):
         if uuid == UUID_CHAR_CHUNKED_WRITE:
             self._consume_chunk(data)
         elif uuid == UUID_CHAR_HR_CONTROL:
+            self.hr_control_writes.append(bytes(data))
             self._on_heart_rate_control(data)
         elif uuid == UUID_CHAR_RAW_SENSOR_CONTROL:
             self._on_sensor_control(data)
@@ -218,6 +239,10 @@ class SimulatedBand(HistoryMixin, AuthMixin, StreamMixin):
     def read(self, uuid: str) -> bytes:
         if uuid == UUID_CHAR_STEPS and self.steps_packets:
             return self.steps_packets[0]
+        if uuid == UUID_CHAR_BATTERY_LEVEL:
+            if self.battery_level is None:
+                raise RuntimeError(f"Characteristic {UUID_CHAR_BATTERY_LEVEL} not found")
+            return bytes([max(0, min(100, int(self.battery_level)))])
         return b""
 
     # ------------------------------------------------------------ notifying

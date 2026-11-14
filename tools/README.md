@@ -1,3 +1,5 @@
+**English** · [简体中文](README.zh-CN.md)
+
 # Diagnostic and forensic tools
 
 These scripts are optional companions to the main client. They never run as part

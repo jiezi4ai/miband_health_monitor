@@ -35,6 +35,29 @@ QUEUE_POLL_SECONDS = 0.5
 _SENTINEL = object()
 
 
+def _load_seen_activity_ts(path: Path) -> set[float]:
+    """Return rounded timestamps already written in *activity_history.jsonl*."""
+    seen: set[float] = set()
+    if not path.exists():
+        return seen
+    try:
+        with open(path, encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line:
+                    continue
+                try:
+                    row = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                ts_val = row.get("ts")
+                if isinstance(ts_val, (int, float)):
+                    seen.add(round(float(ts_val), 6))
+    except OSError:
+        return seen
+    return seen
+
+
 def run_writer_loop(store: "TelemetryStore") -> None:
     """Consume the store queue until the close sentinel is received.
 
@@ -45,11 +68,15 @@ def run_writer_loop(store: "TelemetryStore") -> None:
     directory.
     """
     jsonl_handles: dict[str, object] = {}
+    seen_jsonl_activity_ts: set[float] = set()
     conn: Optional[sqlite3.Connection] = None
     pending_commits = 0
     try:
         # -- JSONL sinks: append-only, one handle per stream ------------------
         if store._use_jsonl:
+            activity_path = store.jsonl_paths.get("activity_history")
+            if activity_path is not None:
+                seen_jsonl_activity_ts = _load_seen_activity_ts(activity_path)
             for kind, path in store.jsonl_paths.items():
                 if not path.exists():
                     path.touch(mode=0o600, exist_ok=True)
@@ -76,6 +103,12 @@ def run_writer_loop(store: "TelemetryStore") -> None:
             kind, event_ts, iso_time, payload = item
             if jsonl_handles:
                 handle = jsonl_handles.get(kind)
+                if kind == "activity_history":
+                    ts_key = round(float(event_ts), 6)
+                    if ts_key in seen_jsonl_activity_ts:
+                        handle = None
+                    else:
+                        seen_jsonl_activity_ts.add(ts_key)
                 if handle is not None:
                     row = {"ts": round(event_ts, 6), "iso_time": iso_time, **payload}
                     handle.write(json.dumps(row, ensure_ascii=False) + "\n")  # type: ignore[attr-defined]

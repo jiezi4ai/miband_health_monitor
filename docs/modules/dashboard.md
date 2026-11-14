@@ -1,86 +1,88 @@
-# dashboard — 实时看板与 HTTP API
+**English** · [简体中文](dashboard.zh-CN.md)
 
-## 职责
+# dashboard — Real-time dashboard and HTTP API
 
-在采集会话期间提供一个**零第三方依赖**的本地 Web 界面：
+## Responsibilities
 
-- 内存环形缓冲 + SSE 实时推送；
-- HTTP JSON API（snapshot/history/healthz）；
-- 单页前端（Canvas 图表）由本地资源组合成单文件 HTML；
-- 可选的 SQLite 历史 provider：页面刷新时回填已落盘数据，不从空图开始。
+Provide a local web interface with **zero third-party dependencies** during a collection session:
 
-源码：[miband_monitor/dashboard/](../../miband_monitor/dashboard/)
+- In-memory ring buffer + SSE real-time push;
+- HTTP JSON API (snapshot/history/healthz);
+- Single-page frontend (Canvas charts) assembled from local assets into a single-file HTML;
+- Optional SQLite history provider: backfills already-persisted data when the page refreshes, instead of starting from an empty chart.
 
-## 模块拆分
+Source: [miband_monitor/dashboard/](../../miband_monitor/dashboard/)
 
-| 文件 | 内容 |
+## Module breakdown
+
+| File | Contents |
 |---|---|
-| `constants.py` | 端点路径、SSE 队列上限、默认点集、keepalive 间隔 |
-| `history.py` | `make_db_history_provider(db_path)`：`source=db` 查询 SQLite |
-| `hub.py` | `TelemetryHub`：环形缓冲、订阅队列、`publish_*`、`snapshot`、`history` |
-| `http.py` | 轻量 HTTP 请求解析/响应工具 |
-| `page.py` | 把 `assets/` 组合成自包含页面 |
-| `server.py` | `DashboardServer`：asyncio HTTP 服务、路由、SSE |
-| `assets/` | `dashboard.html`、`dashboard.css`、`dashboard.js` |
+| `constants.py` | Endpoint paths, SSE queue caps, default point sets, keepalive interval |
+| `history.py` | `make_db_history_provider(db_path)`: `source=db` queries SQLite |
+| `hub.py` | `TelemetryHub`: ring buffer, subscriber queues, `publish_*`, `snapshot`, `history` |
+| `http.py` | Lightweight HTTP request parsing/response utilities |
+| `page.py` | Composes `assets/` into a self-contained page |
+| `server.py` | `DashboardServer`: asyncio HTTP server, routes, SSE |
+| `assets/` | `dashboard.html`, `dashboard.css`, `dashboard.js` |
 
-## 公开 API
+## Public API
 
-| 名称 | 说明 |
+| Name | Description |
 |---|---|
-| `TelemetryHub()` | `attach_loop`、`publish_heart_rate/steps/imu/spo2`、`snapshot`、`history`、`subscribe/unsubscribe`、`subscriber_count` |
-| `DashboardServer(hub, host, port, history_provider=None)` | `start()`、`stop()`、`port`、`url` |
-| `make_db_history_provider(db_path)` | 返回 `(kind, limit) -> list[dict]` |
-| 端点 | `GET /`、`/api/snapshot`、`/api/history?kind=&limit=&source=db`、`/events`（SSE）、`/healthz` |
+| `TelemetryHub()` | `attach_loop`, `publish_heart_rate/steps/imu/spo2`, `snapshot`, `history`, `subscribe/unsubscribe`, `subscriber_count` |
+| `DashboardServer(hub, host, port, history_provider=None)` | `start()`, `stop()`, `port`, `url` |
+| `make_db_history_provider(db_path)` | Returns `(kind, limit) -> list[dict]` |
+| Endpoints | `GET /`, `/api/snapshot`, `/api/history?kind=&limit=&source=db`, `/events` (SSE), `/healthz` |
 
-## 数据流
+## Data flow
 
 ```
-cli.callbacks ──> hub.publish_*() ──> ring buffer ──> 订阅队列 ──> /events SSE
+cli.callbacks ──> hub.publish_*() ──> ring buffer ──> subscriber queues ──> /events SSE
                                             │
-页面加载 ──> /api/history?source=db ──> SQLite（线程池，不阻塞事件循环）
-         └─> /events 首帧 snapshot（持久化点 + 实时点按 ts 合并去重）
+page load ──> /api/history?source=db ──> SQLite (thread pool, does not block the event loop)
+         └─> /events first-frame snapshot (persisted points + live points merged and deduped by ts)
 ```
 
-## 依赖
+## Dependencies
 
-- 标准库 `asyncio`、`json`、`sqlite3`、`http`；
-- `miband_monitor.config`（默认 host/port/缓冲上限）与
-  `miband_monitor.storage.readers`（`utc_iso` 等）；
-- 不导入 BLE：只接收已解析样本，便于测试。
+- Standard library `asyncio`, `json`, `sqlite3`, `http`;
+- `miband_monitor.config` (default host/port/buffer caps) and
+  `miband_monitor.storage.readers` (`utc_iso` etc.);
+- Imports no BLE: it only receives already-parsed samples, which makes it easy to test.
 
-## 配置与常量
+## Configuration and constants
 
-| 项 | 默认 | 说明 |
+| Item | Default | Description |
 |---|---|---|
-| `--web-port` / `WEB_PORT` | 关闭 | `0` 表示随机空闲端口 |
-| `--web-host` / `WEB_HOST` | `127.0.0.1` | 默认仅本机；`0.0.0.0` 会暴露到局域网 |
-| `DEFAULT_MAX_POINTS` | 7200 | 每指标内存点数 |
-| `DEFAULT_SNAPSHOT_POINTS` | 600 | snapshot/history 默认条数 |
-| `DEFAULT_SSE_QUEUE_SIZE` | 512 | 慢客户端丢弃阈值，绝不阻塞 BLE |
-| `DEFAULT_SSE_KEEPALIVE_SECONDS` | 15 | SSE 保活注释帧 |
+| `--web-port` / `WEB_PORT` | Off | `0` means a random free port |
+| `--web-host` / `WEB_HOST` | `127.0.0.1` | Local only by default; `0.0.0.0` exposes it to the LAN |
+| `DEFAULT_MAX_POINTS` | 7200 | In-memory points per metric |
+| `DEFAULT_SNAPSHOT_POINTS` | 600 | Default number of snapshot/history entries |
+| `DEFAULT_SSE_QUEUE_SIZE` | 512 | Slow-client drop threshold, never blocks BLE |
+| `DEFAULT_SSE_KEEPALIVE_SECONDS` | 15 | SSE keepalive comment frame |
 
-## 失败模式
+## Failure modes
 
-| 情况 | 行为 |
+| Situation | Behavior |
 |---|---|
-| 端口被占用 | `start()` 抛 `OSError`，CLI 记录 error 并继续无看板采集 |
-| 慢客户端 | 队列满时丢事件，连接仍在，不拖慢 BLE |
-| 浏览器 SSE 断线 | 浏览器自动重连；首帧 snapshot 重新同步 |
-| SQLite 不存在/缺表/`--storage jsonl` | `source=db` 静默降级为空列表，纯实时视图 |
-| DB 查询慢 | 走线程池（`asyncio.to_thread`），不阻塞事件循环 |
-| 页面资源缺失 | `page.py` 组合失败时报错；正常安装包含 `assets/` |
-| 未授权访问 | 无鉴权；默认只绑回环，切勿直接暴露公网 |
+| Port in use | `start()` raises `OSError`, CLI logs an error and continues collecting without the dashboard |
+| Slow client | Events are dropped when the queue is full, the connection stays up and BLE is not slowed down |
+| Browser SSE disconnection | The browser reconnects automatically; the first-frame snapshot resynchronizes |
+| SQLite missing/missing table/`--storage jsonl` | `source=db` silently degrades to an empty list, pure real-time view |
+| Slow DB query | Goes through a thread pool (`asyncio.to_thread`), does not block the event loop |
+| Page asset missing | `page.py` reports an error when assembly fails; a normal installation includes `assets/` |
+| Unauthorized access | No authentication; bound to loopback by default, never expose it directly to the internet |
 
-## 测试
+## Tests
 
-- `tests/test_dashboard.py`（重构后 `tests/dashboard/{test_hub,test_server,test_cli}.py`）：
-  hub 环形缓冲与订阅、HTTP API、SSE 推送、页面路由与回退页、SQLite history provider、
-  CLI 接线。
-- 真机链路验证见 [validation/linux-validation.md](../validation/linux-validation.md)
-  （`/api/snapshot`、`/events` 均有真实数据）。
+- `tests/test_dashboard.py` (after the refactor `tests/dashboard/{test_hub,test_server,test_cli}.py`):
+  hub ring buffer and subscriptions, HTTP API, SSE push, page routes and fallback page, SQLite history provider,
+  CLI wiring.
+- Hardware-link validation see [validation/linux-validation.md](../validation/linux-validation.md)
+  (`/api/snapshot` and `/events` both carry real data).
 
-## 相关文档
+## Related documentation
 
-- [guides/usage.md](../guides/usage.md)（看板启动方式）
-- [guides/data-formats.md](../guides/data-formats.md)（实时/历史时间语义）
-- [modules/offline-dashboard.md](offline-dashboard.md)（离线版区别）
+- [guides/usage.md](../guides/usage.md) (how to start the dashboard)
+- [guides/data-formats.md](../guides/data-formats.md) (real-time/history time semantics)
+- [modules/offline-dashboard.md](offline-dashboard.md) (differences from the offline version)

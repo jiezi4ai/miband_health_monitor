@@ -50,7 +50,10 @@ mi_band.db*
 
 # --- Debug captures & validation bundles ------------------------------------
 # These carry BLE addresses, raw payloads and real health readings.
+# `docs/validation/` is the tracked documentation folder, so only ignore
+# capture bundles named `validation/` elsewhere in the tree.
 validation/
+!docs/validation/
 payloads/
 captures/
 screenshots/

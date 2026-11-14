@@ -35,6 +35,8 @@ async def sync_history(
     client,
     *,
     days: int = DEFAULT_HISTORY_DAYS,
+    since_ts: Optional[float] = None,
+    until_ts: Optional[float] = None,
     include_spo2: bool = True,
     include_activity: bool = True,
     include_spo2_sleep: bool = False,
@@ -45,7 +47,7 @@ async def sync_history(
     on_activity: Optional[Callable[[dict], None]] = None,
     on_spo2_sleep: Optional[Callable[[dict], None]] = None,
 ) -> HistorySyncResult:
-    """Fetch up to *days* of band-side history, repeating while data is stale.
+    """Fetch band-side history since *days* ago (or explicit *since_ts*/*until_ts*).
 
     Fetched samples are returned and optionally forwarded to the ``on_*``
     callbacks (used to persist them). A failure for one data type does not
@@ -62,9 +64,14 @@ async def sync_history(
 
     tz = resolve_band_tz(band_tz)
     fetcher = BandHistoryFetcher(client, timeout=timeout, band_tz=tz)
-    since = (datetime.now(tz) - timedelta(days=max(0, int(days)))).replace(
-        second=0, microsecond=0
-    )
+    if since_ts is not None:
+        since = datetime.fromtimestamp(float(since_ts), tz=tz).replace(
+            second=0, microsecond=0
+        )
+    else:
+        since = (datetime.now(tz) - timedelta(days=max(0, int(days)))).replace(
+            second=0, microsecond=0
+        )
     now_ts = time.time()
 
     tasks: list[tuple[FetchDataType, str, Callable[[list[dict]], None]]] = []
@@ -117,21 +124,32 @@ async def sync_history(
                 break
             previous_last_ts = last_ts
 
-            result.rounds[name] += 1
-            append(result, samples)
+            min_ts = since.timestamp() if since_ts is not None else None
+            emit_samples = [
+                sample
+                for sample in samples
+                if (min_ts is None or sample["ts"] >= min_ts)
+                and (until_ts is None or sample["ts"] <= until_ts)
+            ]
 
-            callback = consumers.get(data_type)
-            if callback is not None:
-                for sample in samples:
-                    try:
-                        callback(sample)
-                    except Exception:  # pragma: no cover - consumer errors must not abort
-                        logger.exception("History sample consumer failed")
+            if emit_samples:
+                result.rounds[name] += 1
+                append(result, emit_samples)
 
-            logger.info(
-                "Fetched %d %s sample(s) up to %s", len(samples), name,
-                _format_ts(last_ts, tz=tz),
-            )
+                callback = consumers.get(data_type)
+                if callback is not None:
+                    for sample in emit_samples:
+                        try:
+                            callback(sample)
+                        except Exception:  # pragma: no cover - consumer errors must not abort
+                            logger.exception("History sample consumer failed")
+
+                logger.info(
+                    "Fetched %d %s sample(s) up to %s",
+                    len(emit_samples),
+                    name,
+                    _format_ts(max(s["ts"] for s in emit_samples), tz=tz),
+                )
             if data_type == FetchDataType.ACTIVITY and last_ts > now_ts + 1800:
                 logger.warning(
                     "Activity timestamps appear %.1fh ahead of host UTC; if the band "
@@ -139,13 +157,14 @@ async def sync_history(
                     "pass --band-tz or set BAND_TZ in .env so activity and SpO2 align.",
                     (last_ts - now_ts) / 3600.0,
                 )
-            if last_ts <= current.timestamp() + 60 or last_ts >= now_ts - 60:
-                break
-            # The band encodes "since" with minute precision: advance to the
-            # next whole minute to avoid fetching the same sample twice.
-            current = (datetime.fromtimestamp(last_ts, tz=tz) + timedelta(minutes=1)).replace(
+            next_current = (datetime.fromtimestamp(last_ts, tz=tz) + timedelta(minutes=1)).replace(
                 second=0, microsecond=0
             )
+            if last_ts <= current.timestamp() + 60 or last_ts >= now_ts - 60:
+                break
+            if until_ts is not None and next_current.timestamp() > until_ts:
+                break
+            current = next_current
 
     return result
 

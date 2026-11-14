@@ -32,6 +32,7 @@ class TelemetryHub:
         }
         self._latest: Dict[str, dict] = {}
         self._counts: Dict[str, int] = {kind: 0 for kind in METRIC_KINDS}
+        self._workout: Optional[dict] = None
         self._subscribers: set[asyncio.Queue] = set()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._events_sent = 0
@@ -94,6 +95,28 @@ class TelemetryHub:
     ) -> None:
         self._publish("spo2", {"spo2": int(spo2), "status": int(status)}, timestamp)
 
+    def publish_workout(
+        self, workout_snapshot: dict, timestamp: Optional[float] = None
+    ) -> None:
+        """Broadcast current workout summary/timeline without entering raw series."""
+        event_ts = time.time() if timestamp is None else float(timestamp)
+        summary = dict(workout_snapshot)
+        self._workout = summary
+        record = {
+            "kind": "workout",
+            "ts": round(event_ts, 6),
+            "iso_time": utc_iso(event_ts),
+            "workout": summary,
+        }
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._fanout, record)
+                return
+            except RuntimeError:
+                pass
+        self._fanout(record)
+
     def _publish(self, kind: str, payload: dict, timestamp: Optional[float]) -> None:
         event_ts = time.time() if timestamp is None else float(timestamp)
         record = {"kind": kind, "ts": round(event_ts, 6), "iso_time": utc_iso(event_ts), **payload}
@@ -137,7 +160,7 @@ class TelemetryHub:
             kind: list(buffer)[-limit:] if limit else []
             for kind, buffer in self._series.items()
         }
-        return {
+        payload = {
             "type": "snapshot",
             "server_time": round(time.time(), 6),
             "counts": dict(self._counts),
@@ -146,6 +169,9 @@ class TelemetryHub:
             "subscribers": len(self._subscribers),
             "events_sent": self._events_sent,
         }
+        if self._workout is not None:
+            payload["workout"] = dict(self._workout)
+        return payload
 
     def history(self, kind: str, limit: int = DEFAULT_SNAPSHOT_POINTS) -> List[dict]:
         if kind not in METRIC_KINDS:

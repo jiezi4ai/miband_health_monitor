@@ -127,6 +127,13 @@ function renderAll() {
 
 function applyRecord(record) {
   const kind = record.kind;
+  if (kind === "workout" && record.workout) {
+    if (window.MiBandWorkout) window.MiBandWorkout.applyWorkout(record.workout, series, MAX_POINTS);
+    messageCount += 1;
+    setText("events", String(messageCount));
+    scheduleRender();
+    return;
+  }
   if (!series[kind]) return;
   const rows = series[kind];
   if (rows.length && record.ts < rows[rows.length - 1].ts) {
@@ -174,6 +181,9 @@ function applySnapshot(snapshot) {
     series[kind] = mergeRows(dbSeries[kind], snapshot.series[kind] || []);
     const rows = series[kind];
     if (rows.length) applyLatest(kind, rows[rows.length - 1]);
+  }
+  if (snapshot.workout && window.MiBandWorkout) {
+    window.MiBandWorkout.applyWorkout(snapshot.workout, series, MAX_POINTS);
   }
   setText("events", String(snapshot.events_sent || 0));
   messageCount = snapshot.events_sent || 0;

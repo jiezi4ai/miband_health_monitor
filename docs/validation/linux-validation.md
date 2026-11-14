@@ -1,195 +1,197 @@
-# Linux 验证报告（Ubuntu 24.04 / BlueZ）
+**English** · [简体中文](linux-validation.zh-CN.md)
 
-> 验证日期：2026-11-08（两轮：软件链路 + 真机） · 被测提交：`4f4d63b`（`main`）
-> 环境：Ubuntu 24.04.5 LTS，内核 6.8.0-147，x86-64；Python 3.13.13（conda 与 `python3 -m venv`）；
-> BlueZ 5.72，USB 适配器 `hci0`，systemd `bluetooth` 服务 active。
-> 设备：Mi Smart Band 6（地址已脱敏）。
-> **本次只做验证与记录，未修改任何代码。** 诊断用的 BlueZ agent 脚本放在 `/tmp`，不属于仓库。
+# Linux Validation Report (Ubuntu 24.04 / BlueZ)
 
-## 1. 结论速览
+> Validation date: 2026-11-08 (two rounds: software path + real device) · Commit under test: `4f4d63b` (`main`)
+> Environment: Ubuntu 24.04.5 LTS, kernel 6.8.0-147, x86-64; Python 3.13.13 (conda and `python3 -m venv`);
+> BlueZ 5.72, USB adapter `hci0`, systemd `bluetooth` service active.
+> Device: Mi Smart Band 6 (address redacted).
+> **This round only performs validation and recording; no code was modified.** The diagnostic BlueZ agent script was placed in `/tmp` and is not part of the repository.
 
-| 层次 | 结果 |
+## 1. Conclusions at a Glance
+
+| Layer | Result |
 |---|---|
-| 单元/集成测试（无硬件） | ✅ 216 passed / 4 skipped（原生与纯 Python 两种 ECDH 后端各跑一遍） |
-| demo 全链路（采集→存储→CSV→看板） | ✅ 通过，产物齐全 |
-| 真实 BLE 扫描 | ✅ 可用（非 root、无需 `bluetooth` 组） |
-| 真机连接 + Chunked ECDH 认证 | ✅ 成功（未配对/已配对均可完成认证） |
-| 真机心率 / 步数 / IMU 流 | ⚠️ 步数与 IMU ✅；心率在已配对的一轮里 **0 条通知**（待复测） |
-| 真机历史同步 | ✅ 1188 条活动样本 + 1 条 SpO2（`--sync-history 1`） |
-| 真机长会话稳定性 | ⚠️ 未配对：约 36 s 断链；**配对后：300 s 完整跑满** |
-| 实时看板接真机数据 | ✅ `/api/snapshot`、`/api/history`、`/events` 均有真实数据 |
-| 记录的问题 | 10 条（L1–L10）+ 5 条备注（N1–N5）；其中 **L9/L10 已在 P0 中修复（§7）** |
+| Unit/integration tests (no hardware) | ✅ 216 passed / 4 skipped (run once each with the native and pure-Python ECDH backends) |
+| demo end-to-end path (collection→storage→CSV→dashboard) | ✅ Passed, artifacts complete |
+| Real BLE scanning | ✅ Available (non-root, no `bluetooth` group needed) |
+| Real-device connection + Chunked ECDH authentication | ✅ Success (authentication completes both when unpaired and when paired) |
+| Real-device heart rate / steps / IMU streams | ⚠️ Steps and IMU ✅; heart rate produced **0 notifications** in the paired round (to be retested) |
+| Real-device history sync | ✅ 1188 activity samples + 1 SpO2 (`--sync-history 1`) |
+| Real-device long-session stability | ⚠️ Unpaired: disconnect at about 36 s; **after pairing: full 300 s** |
+| Live dashboard with real-device data | ✅ `/api/snapshot`, `/api/history`, `/events` all have real data |
+| Recorded issues | 10 (L1–L10) + 5 notes (N1–N5); of which **L9/L10 were fixed in P0 (§7)** |
 
-**一句话**：软件层在 Linux 可用；真机可用，但前提是**先在 BlueZ 侧完成配对**，
-否则连接会在约 36 秒后被手环断开（L9）。这正好对应原报告的 L7 风险。
+**In one sentence**: the software layer works on Linux; the real device works, provided that **pairing is completed on the BlueZ side first**,
+otherwise the connection is dropped by the band after about 36 seconds (L9). This corresponds exactly to the L7 risk in the original report.
 
-## 2. 通过的验证项（软件链路，第一轮）
+## 2. Passed Validation Items (software path, first round)
 
-| # | 项目 | 命令 / 方法 | 结果 |
+| # | Item | Command / method | Result |
 |---|---|---|---|
-| 1 | 测试套件（原生 ECDH） | `python3 -m pytest -q` | 216 passed / 4 skipped |
-| 2 | 测试套件（纯 Python ECDH） | `MIBAND_ECDH_BACKEND=python python3 -m pytest -q` | 216 passed |
-| 3 | 按文档走 venv 安装 | `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` | 安装成功，pytest/demo 均通过 |
-| 4 | CI 全链路 | `miband_client.py --demo 2 --imu --sync-history 1 --sync-sleep-spo2 --storage both --export-csv` | 7 个必需产物全部非空 |
-| 5 | 真实 BLE 扫描 | `scan_ble.py` / `scan_live.py` | 可用；手环广播时能发现 |
-| 6 | 扫描超时 | `--device-id C0:FF:EE:C0:FF:EE --scan-timeout 3` | 报错清晰，exit 1 |
-| 7 | Ctrl+C | demo 运行中 / 扫描中发送 SIGINT | 优雅退出，`Storage summary` 正常 |
-| 8 | 存储后端 | `--storage jsonl / sqlite / both / none` | 四种均正确 |
-| 9 | 非 ASCII + 空格路径 | `--output "/tmp/数据 目录"` | 正常写入 |
-| 10 | 看板 HTTP | `/`、`/api/snapshot`、`/api/history`（含 `source=db`）、`/events`(SSE)、`/healthz` | 全部 200 |
-| 11 | 端口占用 | 两次绑定 `18080` | 明确报错，不崩溃 |
-| 12 | 离线看板/报告/导出 | `history_dashboard.py`、`history_report.py`、`export_csv.py`、`sleep_analysis.py` | 正常 |
-| 13 | 0x26 载荷导入 | `tools/import_spo2_sleep.py`（合成 91B 载荷） | 3 条样本写入 JSONL+SQLite |
-| 14 | ECDH 三级回退 | native → 现场 `gcc` 编译 → 纯 Python | 三级均可用，共享密钥一致 |
-| 15 | 环境变量 | `SCAN_TIMEOUT`、`BLE_MTU`、`LOG_LEVEL`、`STORAGE_BACKEND`、`DEMO_MODE` | 均生效 |
-| 16 | 参数校验 | `--sync-sleep-spo2` 缺 `--sync-history` | argparse 拒绝，exit 2 |
-| 17 | 反向兼容检查 | 无 `fcntl/termios/resource` 等 POSIX-only 依赖；CSV 使用 `newline=""` | 不阻碍 Windows |
+| 1 | Test suite (native ECDH) | `python3 -m pytest -q` | 216 passed / 4 skipped |
+| 2 | Test suite (pure Python ECDH) | `MIBAND_ECDH_BACKEND=python python3 -m pytest -q` | 216 passed |
+| 3 | venv installation per the docs | `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt` | Installation succeeded; pytest/demo both passed |
+| 4 | CI end-to-end path | `miband_client.py --demo 2 --imu --sync-history 1 --sync-sleep-spo2 --storage both --export-csv` | All 7 required artifacts non-empty |
+| 5 | Real BLE scanning | `scan_ble.py` / `scan_live.py` | Available; the band is discoverable while advertising |
+| 6 | Scan timeout | `--device-id C0:FF:EE:C0:FF:EE --scan-timeout 3` | Clear error, exit 1 |
+| 7 | Ctrl+C | Send SIGINT during a demo run / during scanning | Graceful exit, `Storage summary` normal |
+| 8 | Storage backends | `--storage jsonl / sqlite / both / none` | All four correct |
+| 9 | Non-ASCII + spaces in path | `--output "/tmp/数据 目录"` | Writes normally |
+| 10 | Dashboard HTTP | `/`, `/api/snapshot`, `/api/history` (including `source=db`), `/events`(SSE), `/healthz` | All 200 |
+| 11 | Port in use | Bind `18080` twice | Clear error, no crash |
+| 12 | Offline dashboard/report/export | `history_dashboard.py`, `history_report.py`, `export_csv.py`, `sleep_analysis.py` | Normal |
+| 13 | 0x26 payload import | `tools/import_spo2_sleep.py` (synthetic 91B payload) | 3 samples written to JSONL+SQLite |
+| 14 | ECDH three-level fallback | native → on-the-fly `gcc` build → pure Python | All three levels work; shared secret consistent |
+| 15 | Environment variables | `SCAN_TIMEOUT`, `BLE_MTU`, `LOG_LEVEL`, `STORAGE_BACKEND`, `DEMO_MODE` | All effective |
+| 16 | Argument validation | `--sync-sleep-spo2` without `--sync-history` | argparse rejects, exit 2 |
+| 17 | Backward-compatibility check | No POSIX-only dependencies such as `fcntl/termios/resource`; CSV uses `newline=""` | Does not block Windows |
 
-## 3. 真机验证（第二轮）
+## 3. Real-Device Validation (second round)
 
-### 3.1 成功了什么
+### 3.1 What Succeeded
 
-| 项目 | 观测 |
+| Item | Observation |
 |---|---|
-| 发现手环 | `Band detected! Establishing BLE link`；广播间断出现，95 s 扫描窗口内捕获 |
-| 连接 | `BLE link established`（MTU 日志恒为 23，见 L10） |
-| Chunked ECDH 认证 | `Chunked ECDH authentication SUCCEEDED. Session is ready.` |
-| 心率流 | 未配对的一轮：70–72 BPM 正常上报（9–16 条） |
-| 步数流 | 正常：`Steps: 8666 | Distance: 5877 m | Calories: 213 kcal` |
-| IMU 流 | 正常：一轮采集到 689 条样本 |
-| 历史同步 | `1188 activity sample(s), 1 SpO2 sample(s), 0 sleep SpO2` |
-| 实时看板 | `/api/snapshot` 返回真实 spo2/imu；`/events` SSE 推送真实数据 |
-| CSV 导出 | 6 张表全部生成（heart_rate 16、imu 689、activity_history 1188 等） |
-| 长会话 | 配对后 **300 s 完整跑满**：`Collection window (300s) elapsed` |
+| Band discovery | `Band detected! Establishing BLE link`; advertising appeared intermittently and was captured within the 95 s scan window |
+| Connection | `BLE link established` (the MTU log was always 23, see L10) |
+| Chunked ECDH authentication | `Chunked ECDH authentication SUCCEEDED. Session is ready.` |
+| Heart-rate stream | Unpaired round: 70–72 BPM reported normally (9–16 records) |
+| Step stream | Normal: `Steps: 8666 | Distance: 5877 m | Calories: 213 kcal` |
+| IMU stream | Normal: 689 samples collected in one round |
+| History sync | `1188 activity sample(s), 1 SpO2 sample(s), 0 sleep SpO2` |
+| Live dashboard | `/api/snapshot` returns real spo2/imu; `/events` SSE pushes real data |
+| CSV export | All 6 tables generated (heart_rate 16, imu 689, activity_history 1188, etc.) |
+| Long session | After pairing, **full 300 s**: `Collection window (300s) elapsed` |
 
-### 3.2 断链的定位过程
+### 3.2 Locating the Disconnect
 
-未配对时的两次会话，都在**开始采集后约 36 秒**终止：
+The two unpaired sessions both terminated about **36 seconds after collection began**:
 
 ```
 12:40:28 [ERROR] Heart-rate keep-alive failed; treating link as lost:
   [org.freedesktop.DBus.Error.UnknownObject] Method "WriteValue" ... doesn't exist
 ```
 
-- BlueZ 日志给出根因：`src/device.c:new_auth() No agent available for request type 2`
-  与 `device_confirm_passkey: Operation not permitted` —— 手环发起配对，系统没有 agent。
-- 断开后 BlueZ 直接移除设备对象（`bluetoothctl info` → `not available`），
-  于是后续写特征命中 `UnknownObject`；应用把它当作链路丢失，行为正确但报错文案有误导性。
-- 对照实验：用 D-Bus 注册 `NoInputNoOutput` agent 后重连，
-  agent 收到 `RequestAuthorization ... -> accept`，设备变为 `Paired: yes`，
-  同一命令 **300 秒不再掉线**。
+- The BlueZ log gives the root cause: `src/device.c:new_auth() No agent available for request type 2`
+  and `device_confirm_passkey: Operation not permitted` — the band initiated pairing and the system had no agent.
+- After the disconnect, BlueZ removed the device object (`bluetoothctl info` → `not available`),
+  so subsequent characteristic writes hit `UnknownObject`; the application treats this as a lost link — the behavior is correct, but the error wording is misleading.
+- Control experiment: after registering a `NoInputNoOutput` agent via D-Bus and reconnecting,
+  the agent received `RequestAuthorization ... -> accept`, the device became `Paired: yes`,
+  and the same command ran **300 seconds without dropping**.
 
-结论：**L9 成立**——Linux 上不先配对，连接会被手环在约 36 秒后断开。
+Conclusion: **L9 holds**—on Linux, without pairing first, the connection is dropped by the band after about 36 seconds.
 
-### 3.3 待复测
+### 3.3 To Be Retested
 
-已配对的那一轮（300 s）心率通知为 **0 条**，而步数每 60 s 正常上报；
-此前未配对的两轮心率正常。差异可能来自手环佩戴状态（光学心率在离腕时停止），
-也可能与配对后特征权限有关，**目前不能归因**，需要在佩戴状态下复测。
+In the paired round (300 s), heart-rate notifications were **0 records**, while steps were reported normally every 60 s;
+the two earlier unpaired rounds had normal heart rate. The difference may come from the band's wearing state (optical heart rate stops when off-wrist),
+or from characteristic permissions after pairing; **it cannot be attributed at present** and needs to be retested while worn.
 
-## 4. 问题清单（已记录，**未修复**）
+## 4. Issue List (recorded, **not fixed**)
 
-### L1 · `.env` 实际权限 0644，与文档声称的 0600 不符
-- **现象**：`ls -l .env` → `-rw-r--r--`；README 第 805 行承诺"忽略，权限 0600"。
-- **原因**：代码只在**写入** `.env` 时 `chmod 0600`（`get_auth_key.py:67`、`fetch_by_token.py:49`），读取时不检查也不收紧。
-- **影响**：Linux 多用户主机上 `AUTH_KEY` 可被同机其他用户读取。
-- **平台相关性**：是（Windows ACL 下"0600"不成立，故在 Windows 上不可见）。
+### L1 · `.env` actual permissions are 0644, not the documented 0600
+- **Symptom**: `ls -l .env` → `-rw-r--r--`; README line 805 promises "ignored, permissions 0600".
+- **Cause**: the code only `chmod 0600`s `.env` when **writing** it (`get_auth_key.py:67`, `fetch_by_token.py:49`); it neither checks nor tightens on read.
+- **Impact**: on multi-user Linux hosts, `AUTH_KEY` can be read by other users on the same machine.
+- **Platform relevance**: yes (under Windows ACLs "0600" does not apply, so it is not visible on Windows).
 
-### L2 · 遥测产物权限过大（0664 / 0644）
-- **现象**：`heart_rate.jsonl` 为 `-rw-rw-r--`，`mi_band.db` 为 `-rw-r--r--`。
-- **影响**：个人健康数据在共享目录下可读，与仓库的隐私定位不一致。
-- **平台相关性**：是（Windows 默认按用户 ACL）。
+### L2 · Telemetry artifacts have overly broad permissions (0664 / 0644)
+- **Symptom**: `heart_rate.jsonl` is `-rw-rw-r--`, `mi_band.db` is `-rw-r--r--`.
+- **Impact**: personal health data is readable in shared directories, inconsistent with the repository's privacy stance.
+- **Platform relevance**: yes (Windows uses per-user ACLs by default).
 
-### L3 · 输出目录不可写/被同名文件占用 → 未捕获异常 + 原始 traceback
-- **现象**：只读目录 → `PermissionError`；`--output` 指向文件 → `FileExistsError`；
-  两者都直接打印 Python 堆栈，exit 1。
-- **平台相关性**：跨平台，Linux 更易触发。
-- **建议方向**：捕获 `OSError` 并给出可操作提示。
+### L3 · Unwritable output directory / occupied by a same-named file → uncaught exception + raw traceback
+- **Symptom**: read-only directory → `PermissionError`; `--output` pointing at a file → `FileExistsError`;
+  both print the raw Python stack and exit 1.
+- **Platform relevance**: cross-platform, easier to trigger on Linux.
+- **Suggested direction**: catch `OSError` and provide actionable guidance.
 
-### L4 · `history_dashboard.py` 对不存在的 DB 静默成功
-- **现象**：生成 22 KB 空看板、exit 0，并创建 0 字节 DB；与 `history_report.py`/`export_csv.py`（exit 1）不一致。
+### L4 · `history_dashboard.py` silently succeeds for a nonexistent DB
+- **Symptom**: generates a 22 KB empty dashboard, exits 0, and creates a 0-byte DB; inconsistent with `history_report.py`/`export_csv.py` (exit 1).
 
-### L5 · 跨平台文档与事实不符
-- `docs/guides/cross-platform.md:3` 称"最初在 Linux（BlueZ）上开发"；`:21` 称 Linux"已长期使用"。
-- `:106` 称 Windows 冒烟"预期：88 passed"，当前为 **216 passed**。
-- **说明**：本轮验证确认 Linux 软件链路可用，但"长期使用"仍不成立；文档应改为"已验证软件链路 + 真机需先配对（见 L9）"。
+### L5 · Cross-platform documentation does not match the facts
+- `docs/guides/cross-platform.md:3` says "originally developed on Linux (BlueZ)"; `:21` says Linux "has been used long-term".
+- `:106` says the Windows smoke test "expected: 88 passed"; the current figure is **216 passed**.
+- **Note**: this round confirms that the Linux software path works, but "used long-term" still does not hold; the docs should be changed to "software path validated + real device requires pairing first (see L9)".
 
-### L6 · `tools/` 三个脚本的用法示例写死 Windows venv 路径
-- `tools/probe_fetch_types.py:9`、`probe_sleep_session.py:29`、`calibrate_sleep.py:22` 均为 `./.venv/Scripts/python.exe`。
+### L6 · Usage examples in three `tools/` scripts hard-code the Windows venv path
+- `tools/probe_fetch_types.py:9`, `probe_sleep_session.py:29`, `calibrate_sleep.py:22` all use `./.venv/Scripts/python.exe`.
 
-### L7 · Linux 配对（bonding）环节缺失 → **本轮已被真机证实会断链**（见 3.2）
-- 代码与文档都没有 BlueZ agent / 配对引导；Windows 上系统"添加设备"可能已完成配对，从而掩盖差异。
-- **影响**：不配对时连接约 36 s 后断开；配对后 300 s 稳定。
-- **建议方向**：文档补 `bluetoothctl` 配对步骤（最低成本），或内置 agent（需权衡权限与安全）。
+### L7 · Missing pairing (bonding) step on Linux → **this round confirmed on the real device that the link drops** (see 3.2)
+- Neither the code nor the docs include a BlueZ agent / pairing bootstrap; on Windows, the system "Add a device" may have completed the pairing, masking the difference.
+- **Impact**: without pairing, the connection drops after about 36 s; with pairing it is stable for 300 s.
+- **Suggested direction**: add the `bluetoothctl` pairing steps to the docs (lowest cost), or ship a built-in agent (requires weighing permissions and security).
 
-### L8 · 探针脚本超时参数不一致
-- `probe_fetch_types.py` 无 `--scan-timeout`，无手环时按默认 90 s 扫描后还可能重连，实测 60 s 未退出。
+### L8 · Inconsistent timeout parameters across probe scripts
+- `probe_fetch_types.py` has no `--scan-timeout`; with no band present, after the default 90 s scan it may still reconnect, and it was measured not exiting after 60 s.
 
-### L9 · **【高】未配对时手环在约 36 秒后断链，并触发误导性 D-Bus 报错** —— ✅ 已修复（见 §7）
-- **现象**：两次未配对会话均在 ~36 s 结束；日志为 `UnknownObject: Method "WriteValue" ... doesn't exist`。
-- **根因**：BlueZ `No agent available for request type 2` → `device_confirm_passkey: Operation not permitted`；
-  断链后 BlueZ 移除设备对象，后续特征写入命中已消失的对象。
-- **对照**：注册 agent 完成配对后，同一命令 300 s 不掉线（见 3.2）。
-- **影响**：Linux 新用户按文档直接运行会反复遇到"采集几十秒就停"，且错误信息指向不存在的方法，难以自查。
-- **修复**：文档补齐配对/trust 步骤；D-Bus 错误翻译为可操作提示（§7）。
+### L9 · **[High] When unpaired, the band drops the link after about 36 seconds and triggers a misleading D-Bus error** — ✅ Fixed (see §7)
+- **Symptom**: both unpaired sessions ended at ~36 s; the log showed `UnknownObject: Method "WriteValue" ... doesn't exist`.
+- **Root cause**: BlueZ `No agent available for request type 2` → `device_confirm_passkey: Operation not permitted`;
+  after the link dropped, BlueZ removed the device object, and subsequent characteristic writes hit the vanished object.
+- **Control**: after registering an agent and completing pairing, the same command ran 300 s without dropping (see 3.2).
+- **Impact**: new Linux users following the docs would repeatedly encounter "collection stops after a few dozen seconds", and the error message points at a nonexistent method, making self-diagnosis difficult.
+- **Fix**: docs add pairing/trust steps; D-Bus errors are translated into actionable guidance (§7).
 
-### L10 · **【中】ATT MTU 在 Linux 上从未真正协商** —— ✅ 已修复（见 §7）
-- **现象**：每次连接都打印
-  `UserWarning: Using default MTU value. Call _acquire_mtu() or set _mtu_size first`，
-  且启动日志恒为 `MTU=23`。
-- **原因**：`miband_client._resolve_mtu()` 只读取 `client.mtu_size`；bleak 3.0.2 的 BlueZ 后端
-  必须显式调用 `_acquire_mtu()` 才会填充该值，否则返回 23。WinRT/macOS 后端会在连接时自动填充。
-- **影响**：分块写按 20 字节载荷发送，认证与历史同步的分块数量成倍增加（本轮 1188 条历史仍能同步完成，但更慢，
-  弱信号下更容易触发认证超时）。
-- **平台相关性**：是，且属于"Windows 正常、Linux 悄悄降级"的典型差异。
-- **修复**：连接后显式 `_acquire_mtu()`；实测 MTU 23 → **247**（§7）。
+### L10 · **[Medium] ATT MTU is never actually negotiated on Linux** — ✅ Fixed (see §7)
+- **Symptom**: every connection prints
+  `UserWarning: Using default MTU value. Call _acquire_mtu() or set _mtu_size first`,
+  and the startup log always shows `MTU=23`.
+- **Cause**: `miband_client._resolve_mtu()` only reads `client.mtu_size`; the BlueZ backend of bleak 3.0.2
+  only populates that value when `_acquire_mtu()` is called explicitly, otherwise it returns 23. The WinRT/macOS backends populate it automatically on connection.
+- **Impact**: chunked writes are sent with 20-byte payloads, multiplying the number of chunks for authentication and history sync (this round's 1188 history records still synced, but more slowly,
+  and weak-signal conditions are more likely to trigger authentication timeouts).
+- **Platform relevance**: yes, and it is a typical "Windows normal, Linux silently degraded" difference.
+- **Fix**: call `_acquire_mtu()` explicitly after connecting; measured MTU 23 → **247** (§7).
 
-## 5. 备注（非缺陷，避免误判）
+## 5. Notes (not defects; avoid misjudgment)
 
-- **N1 · 预编译库仅覆盖 x86-64/glibc**：`libecdh.so` 为 ELF x86-64；ARM/musl 上会先现场 `gcc` 编译，失败再纯 Python。该回退链已验证。
-- **N2 · 日志时间为 UTC**：本机 `TZ=Etc/UTC`。
-- **N3 · `scan_live.py` 管道下无输出**：Python 缓冲，`-u` 或 TTY 下正常。
-- **N4 · 失败后没有 "Reconnecting" 日志**：当 `duration` 已耗尽时，`run_monitor` 会静默 `return`（deadline 判断）。
-  属预期行为，但缺少"采集窗口已结束"的收尾日志，容易误判为重连失效。
-- **N5 · 手环广播是间断的**：息屏后基本不广播；`scan_ble.py` 默认 8 s 窗口经常扫不到，
-  需要更长的 `--scan-timeout` 或 `scan_live.py` 连续扫描。
+- **N1 · Prebuilt library covers only x86-64/glibc**: `libecdh.so` is an ELF x86-64 binary; on ARM/musl it first builds on the fly with `gcc`, then falls back to pure Python if that fails. The fallback chain has been verified.
+- **N2 · Log times are UTC**: the host uses `TZ=Etc/UTC`.
+- **N3 · `scan_live.py` produces no output when piped**: Python buffering; it works normally with `-u` or under a TTY.
+- **N4 · No "Reconnecting" log after a failure**: when `duration` is already exhausted, `run_monitor` silently `return`s (deadline check).
+  This is expected behavior, but the lack of a "collection window finished" wrap-up log makes it easy to misread as a reconnect failure.
+- **N5 · Band advertising is intermittent**: after the screen goes off it basically stops advertising; `scan_ble.py`'s default 8 s window often misses it,
+  so a longer `--scan-timeout` or continuous scanning with `scan_live.py` is needed.
 
-## 6. 复现命令摘要
+## 6. Reproduction Command Summary
 
 ```bash
-# 软件链路
+# Software path
 python3 -m pytest -q
 python3 miband_client.py --demo 2 --imu --sync-history 1 --sync-sleep-spo2 \
   --output /tmp/ci-demo --storage both --export-csv
 
-# 真机（先配对，见 L9）
+# Real device (pair first, see L9)
 bluetoothctl pairable on
-python3 /tmp/bt_agent.py 900 &          # 诊断用 agent（不属仓库）
+python3 /tmp/bt_agent.py 900 &          # diagnostic agent (not part of the repository)
 python3 miband_client.py 300 --scan-timeout 180 --storage both --imu
 
-# 看板
+# Dashboard
 python3 miband_client.py --demo 15 --web-port 0
 curl -s http://127.0.0.1:<port>/healthz
 ```
 
-> 报告中设备地址均为占位符；`data/`、`.venv/`、`.cache/` 均被 `.gitignore` 覆盖。
-> 本轮为对照实验配对过一次，如需撤销：`bluetoothctl remove <MAC>`。
+> In this report all device addresses are placeholders; `data/`, `.venv/`, and `.cache/` are all covered by `.gitignore`.
+> This round paired once for the control experiment; to undo: `bluetoothctl remove <MAC>`.
 
 ---
 
-## 7. P0 修复与复验（2026-11-09）
+## 7. P0 Fixes and Re-Verification (2026-11-09)
 
-针对 L9/L10 以及"Linux 连接难"的体感，做了四项改动，全部只在 Linux 路径生效，
-Windows/macOS 行为不变。
+For L9/L10 and the perceived experience of "Linux connections are hard", four changes were made, all effective only on the Linux path;
+Windows/macOS behavior is unchanged.
 
-| 改动 | 落点 | 复验结果 |
+| Change | Where | Re-verification result |
 |---|---|---|
-| 配对引导 + 环境自检 | `docs/guides/cross-platform.md` §2.3/§2.5、`doctor.py`、`--doctor` | 自检能指出"未配对/不可配对/.env 权限"，并给出可复制的命令 |
-| 直连快路径（跳过扫描） | `bluez_support.paired_device()`、`MiBand6Client._open_client()` | 日志 `Bonded band ... skipping discovery`，**未发生扫描** |
-| ATT MTU 协商 | `bluez_support.try_acquire_mtu()`、`_apply_mtu()` | `MTU=23` → **`MTU=247`**，`UserWarning` 消失 |
-| D-Bus 错误翻译 | `bluez_support.describe_ble_error()` | `UnknownObject` 被翻译为"未配对/已断开"+ 修复命令 |
+| Pairing guidance + environment self-check | `docs/guides/cross-platform.md` §2.3/§2.5, `doctor.py`, `--doctor` | The self-check identifies "unpaired/not pairable/.env permissions" and provides copy-pasteable commands |
+| Direct-connect fast path (skips scanning) | `bluez_support.paired_device()`, `MiBand6Client._open_client()` | Log `Bonded band ... skipping discovery`, **no scan occurred** |
+| ATT MTU negotiation | `bluez_support.try_acquire_mtu()`, `_apply_mtu()` | `MTU=23` → **`MTU=247`**, `UserWarning` gone |
+| D-Bus error translation | `bluez_support.describe_ble_error()` | `UnknownObject` translated to "unpaired/disconnected" + fix command |
 
-真机复验日志（节选）：
+Real-device re-verification log (excerpt):
 
 ```
 22:31:17 [INFO] Bonded band C0:FF:EE:C0:FF:EE found in the BlueZ object tree; skipping discovery.
@@ -198,49 +200,49 @@ Windows/macOS 行为不变。
 22:31:28 [INFO] Chunked ECDH authentication SUCCEEDED. Session is ready.
 ```
 
-补充说明：
+Additional notes:
 
-- 直连失败（手环不在范围/休眠）时会在 12 秒内回退到扫描，不会占用完整连接超时；
-- `--no-direct-connect` 可强制回到扫描路径，便于排查"缓存对象过期"；
-- 新增测试 `tests/test_bluez_support.py`（26 项），全套 **242 passed / 4 skipped**；
-- L9 的"配对后 300 秒稳定"与 L10 的"MTU 247"均已在本机真机复现验证。
+- If the direct connection fails (band out of range/asleep), it falls back to scanning within 12 seconds and does not consume the full connection timeout;
+- `--no-direct-connect` forces the scan path, useful for investigating "stale cached objects";
+- Added test `tests/test_bluez_support.py` (26 items); full suite **242 passed / 4 skipped**;
+- L9's "stable for 300 seconds after pairing" and L10's "MTU 247" have both been reproduced and verified on the real device on this machine.
 
 ---
 
-## 8. 追加：2026-11-12 连接不稳定专项排查
+## 8. Addendum: 2026-11-12 Connection-Instability Investigation
 
-> 本节只做索引与结论摘要，完整证据链、时间线与根因清单见
-> [Linux 连接排查纪实](linux-ble-connect-findings.md)。
+> This section only indexes and summarizes conclusions; for the full evidence chain, timeline, and root-cause list, see
+> [Linux connection troubleshooting findings](linux-ble-connect-findings.md).
 
-### 8.1 新发现（推翻了两条旧结论）
+### 8.1 New Findings (overturning two old conclusions)
 
-| 旧记录 | 2026-11-12 实测 |
+| Old record | 2026-11-12 measurement |
 |---|---|
-| "扫描期间点亮并滑动手环屏幕即可广播" | **无效**。只扫不连 35 s：心率测量页仅 1 个脉冲（`+21.7 s`），主表盘连续上下滑动 **0 个脉冲**。手环在无手机链路时固定每 **40–60 秒** 发 1 个孤立可连接脉冲 |
-| "`hog-lib.c` 报错堵死 ATT 队列，所以应该 `Trusted=False`" | **不是根因**。11-09 连续 9 次成功会话全部是 `Trusted=True`（数据见 `data/heart_rate.jsonl`、`data/steps.jsonl` 的 `23:25–23:41`），`hog-lib` 报错是在**断链瞬间**才结算打印的 |
+| "Waking and swiping the band screen during scanning makes it advertise" | **Ineffective.** Scan-only for 35 s: the heart-rate measurement page produced only 1 pulse (`+21.7 s`), and continuously swiping up and down on the main watch face produced **0 pulses**. With no phone link, the band emits exactly 1 isolated connectable pulse every **40–60 seconds** |
+| "`hog-lib.c` errors clog the ATT queue, so `Trusted=False` should be used" | **Not the root cause.** The 9 consecutive successful sessions on 11-09 were all `Trusted=True` (data in `data/heart_rate.jsonl`, `data/steps.jsonl` at `23:25–23:41`); the `hog-lib` error is only settled and printed **at the moment the link drops** |
 
-### 8.2 新增问题（编号接续 L10）
+### 8.2 New Issues (numbering continues from L10)
 
-| 编号 | 级别 | 问题 | 结论 |
+| ID | Severity | Issue | Conclusion |
 |---|---|---|---|
-| L11 | 高 | 未配对时手环只在建链后 ~9–9.8 s 内允许枚举，首次全量 150 个 GATT 句柄在深休眠连接间隔下跑不完 | 与 L9 的"36–40 s 断链"是两个不同机制；本轮的"抓脉冲 → 长时间待命"解决了"抓不到"的一半 |
-| L12 | 高 | 取消挂起中的 `LE Create Connection`（超时或主动 `Disconnect`）会让 BARROT `33fa:0012` 扫描**静默假死**：HCI 命令照常完成，空口广播事件恒 0 | 只能 USB 级复位（`usbreset`/拔插），D-Bus `Powered=false/true` **无效** |
-| L13 | 中 | `bleak 3.0.2` 在 `le-connection-abort-by-local` 上死锁 41 s（等待永不出现的 `Connected=false`） | 已由 `bluez_support.wait_for_bluez_link()` 接管重挂 |
-| L14 | 中 | `DuplicateData=True` 在 BT 5/6 控制器上每 ~5 s 重启扩展扫描（75 s 内 31 条 `0x2041/0x2042`），是该适配器 `-112` 假死的诱因 | 默认已改为 `False` |
+| L11 | High | When unpaired, the band only allows enumeration within ~9–9.8 s after link establishment; the first full enumeration of 150 GATT handles cannot finish at a deep-sleep connection interval | This is a different mechanism from L9's "36–40 s disconnect"; this round's "catch the pulse → long standby" solved half of the "cannot catch it" problem |
+| L12 | High | Cancelling a pending `LE Create Connection` (timeout or active `Disconnect`) makes the BARROT `33fa:0012` scan **silently stall**: HCI commands complete as usual, but over-the-air advertising events stay 0 | Only a USB-level reset (`usbreset`/unplug-replug) works; D-Bus `Powered=false/true` is **ineffective** |
+| L13 | Medium | `bleak 3.0.2` deadlocks for 41 s on `le-connection-abort-by-local` (waiting for a `Connected=false` that never appears) | Already handled by `bluez_support.wait_for_bluez_link()` re-arming |
+| L14 | Medium | `DuplicateData=True` restarts extended scanning every ~5 s on BT 5/6 controllers (31 `0x2041/0x2042` events in 75 s), a trigger for this adapter's `-112` stall | Default changed to `False` |
 
-### 8.3 代码修订（详见 findings 文档 §5）
+### 8.3 Code Changes (see findings document §5 for details)
 
-- `bluez_support.py`：`link_standby_budget()`、`wait_for_bluez_link()`、`scanner_kwargs()` 默认不去重、
-  `is_transient_connect_error()` 补 `failed to discover services`、错误文案重写；
-- `miband_client.py`：Linux 走 `_open_bluez_link()`（长驻 `Device1.Connect`，绝不中途 `Disconnect`），
-  非 Linux 走 `_open_generic_link()`；`ServicesResolved` 后等待 SMP 结算再写 GATT；
-  `start_notify` 改为 6 s × 2 有界重试；`--connect-timeout` 默认 75 s；
-- `doctor.py`：`trust` 优先、补充单脉冲广播说明。
+- `bluez_support.py`: `link_standby_budget()`, `wait_for_bluez_link()`, `scanner_kwargs()` no longer deduplicates by default,
+  `is_transient_connect_error()` adds `failed to discover services`, error wording rewritten;
+- `miband_client.py`: Linux goes through `_open_bluez_link()` (long-lived `Device1.Connect`, never `Disconnect` midway),
+  non-Linux goes through `_open_generic_link()`; after `ServicesResolved`, wait for SMP to settle before writing GATT;
+  `start_notify` changed to a 6 s × 2 bounded retry; `--connect-timeout` default 75 s;
+- `doctor.py`: `trust` takes priority; added a note about single-pulse advertising.
 
-### 8.4 回归结果
+### 8.4 Regression Results
 
 ```
 python3 -m pytest -q                            # 266 passed, 4 skipped
 MIBAND_ECDH_BACKEND=python python3 -m pytest -q  # 266 passed, 4 skipped
-python3 miband_client.py --demo 3 --imu --storage both  # 全链路正常
+python3 miband_client.py --demo 3 --imu --storage both  # end-to-end path normal
 ```

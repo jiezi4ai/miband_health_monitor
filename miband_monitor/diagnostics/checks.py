@@ -59,3 +59,56 @@ def _mask(identifier: str) -> str:
     if ":" in text and len(text) == 17:
         return "XX:XX:XX:XX:" + text[-5:]
     return text[-4:].rjust(len(text), "*") if text else ""
+
+
+def inspect_usb_autosuspend(
+    adapter_name: str = "hci0",
+    *,
+    sysfs_bluetooth_root: Path = Path("/sys/class/bluetooth"),
+) -> Optional[dict]:
+    """Read-only inspect of USB Bluetooth adapter autosuspend settings on Linux."""
+    dev_link = sysfs_bluetooth_root / adapter_name / "device"
+    if not dev_link.exists():
+        return None
+    try:
+        resolved = dev_link.resolve()
+    except OSError:
+        return None
+
+    usb_node: Optional[Path] = None
+    for candidate in (resolved, *resolved.parents):
+        if candidate == Path("/"):
+            break
+        if (candidate / "power").is_dir() and (
+            (candidate / "idVendor").exists() or "usb" in candidate.name.lower()
+        ):
+            usb_node = candidate
+            break
+
+    if usb_node is None:
+        return None
+
+    power_dir = usb_node / "power"
+    try:
+        control = (power_dir / "control").read_text(encoding="utf-8").strip()
+    except OSError:
+        control = "unknown"
+    try:
+        delay_ms = (power_dir / "autosuspend_delay_ms").read_text(encoding="utf-8").strip()
+    except OSError:
+        delay_ms = "unknown"
+
+    risky = False
+    if control == "auto":
+        try:
+            risky = int(delay_ms) >= 0
+        except ValueError:
+            risky = True
+
+    return {
+        "usb_device": usb_node.name,
+        "control": control,
+        "delay_ms": delay_ms,
+        "risky": risky,
+        "power_dir": str(power_dir),
+    }

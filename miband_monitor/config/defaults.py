@@ -96,3 +96,24 @@ DEFAULT_HTTP_STOP_TIMEOUT = 2.0
 DEFAULT_HISTORY_DAYS = 7
 #: Default window (days) for the offline historical dashboard.
 DEFAULT_OFFLINE_DAYS = 7
+
+# ---------------------------------------------------------------------------
+# Watchdog & Workout defaults
+# ---------------------------------------------------------------------------
+#: Heart-rate keep-alive ping period in seconds (Mi Band 6 drops near ~30 s).
+DEFAULT_HR_KEEPALIVE_INTERVAL = 12.0
+#: Silence duration (seconds) before Tier-1 soft HR stream re-arm is sent.
+DEFAULT_HR_SILENCE_SOFT_SECONDS = 24.0
+#: Silence duration (seconds) before Tier-2 forced disconnect/reconnect triggers.
+DEFAULT_HR_SILENCE_HARD_SECONDS = 48.0
+#: Maximum soft re-arm attempts before escalating to hard reconnect.
+DEFAULT_HR_SOFT_REARM_MAX = 2
+#: Best-effort battery level polling interval during workout mode (seconds).
+DEFAULT_BATTERY_POLL_SECONDS = 300.0
+#: Minimum disconnect duration (seconds) required to trigger ACTIVITY gap-fill.
+DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS = 60.0
+#: Default workout physiological profile parameters.
+DEFAULT_WORKOUT_AGE = 30
+DEFAULT_WORKOUT_WEIGHT_KG = 70.0
+DEFAULT_WORKOUT_SEX = "male"
+DEFAULT_WORKOUT_HR_MAX = 190

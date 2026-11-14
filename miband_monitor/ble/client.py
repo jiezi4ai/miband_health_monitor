@@ -27,12 +27,17 @@ from .. import bluez
 from ..config.defaults import (
     DEFAULT_AUTH_TIMEOUT,
     DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_HR_KEEPALIVE_INTERVAL,
+    DEFAULT_HR_SILENCE_HARD_SECONDS,
+    DEFAULT_HR_SILENCE_SOFT_SECONDS,
+    DEFAULT_HR_SOFT_REARM_MAX,
     DEFAULT_SCAN_TIMEOUT,
 )
 from .auth_connect import AuthConnectMixin
 from .auth_handshake import AuthHandshakeMixin
 from .auth_state import AuthStateMixin
 from .backends import BleakClient, BleakScanner
+from .battery import BatteryMixin
 from .chunked import write_chunked_value  # noqa: F401  (lazy test/patch seam)
 from .discovery import DiscoveryMixin
 from .identity import normalize_auth_key
@@ -64,6 +69,7 @@ class MiBand6Client(
     AuthStateMixin,
     AuthConnectMixin,
     AuthHandshakeMixin,
+    BatteryMixin,
     NotificationMixin,
     StreamMixin,
 ):
@@ -82,6 +88,10 @@ class MiBand6Client(
         connect_timeout: float = DEFAULT_CONNECT_TIMEOUT,
         auth_timeout: float = DEFAULT_AUTH_TIMEOUT,
         direct_connect: bool = True,
+        keepalive_interval: float = DEFAULT_HR_KEEPALIVE_INTERVAL,
+        hr_silence_soft_seconds: float = DEFAULT_HR_SILENCE_SOFT_SECONDS,
+        hr_silence_hard_seconds: float = DEFAULT_HR_SILENCE_HARD_SECONDS,
+        hr_soft_rearm_max: int = DEFAULT_HR_SOFT_REARM_MAX,
     ) -> None:
         self.device_id = (device_id or "").strip()
         # Optional case-insensitive advertised-name match; works on platforms
@@ -117,6 +127,14 @@ class MiBand6Client(
         self._hr_active = False
         self._steps_active = False
         self._sensor_active = False
+        self.keepalive_interval = max(0.01, float(keepalive_interval))
+        self.hr_silence_soft_seconds = float(hr_silence_soft_seconds)
+        self.hr_silence_hard_seconds = float(hr_silence_hard_seconds)
+        self.hr_soft_rearm_max = max(0, int(hr_soft_rearm_max))
+        self._last_hr_notify_at: Optional[float] = None
+        self._hr_soft_rearm_count = 0
+        self._battery_supported: Optional[bool] = None
+        self._last_battery_level: Optional[int] = None
         #: Frame types seen on 0x0002 that are not accelerometer data (logged once).
         self._ignored_sensor_types: set[int] = set()
 

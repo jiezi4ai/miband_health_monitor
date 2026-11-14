@@ -106,6 +106,12 @@ def insert_record(
             (event_ts, iso_time, payload["spo2"], payload["auto_measure"]),
         )
     elif kind == "activity_history":
+        existing = conn.execute(
+            "SELECT 1 FROM activity_history WHERE ts = ? LIMIT 1",
+            (event_ts,),
+        ).fetchone()
+        if existing is not None:
+            return
         conn.execute(
             _INSERT_SQL[kind],
             (

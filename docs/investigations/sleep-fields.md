@@ -1,109 +1,129 @@
-# 活动记录末尾三个字节的调查结论
+**English** · [简体中文](sleep-fields.zh-CN.md)
 
-> **数据脱敏说明**：文中日期均为占位日期（统一映射到 2020 年 1 月），仅用于区分夜次与相对顺序，不代表真实采集时间；所列数值为聚合统计，不含设备标识、账号或逐分钟原始样本。
+# Investigation conclusions on the three bytes at the end of activity records
 
+> **De-identification note**: the dates in this document are all placeholder dates (uniformly mapped
+> to January 2020) and serve only to distinguish nights and their relative order; they do not
+> represent real collection times. The listed values are aggregate statistics and contain no device
+> identifiers, accounts or per-minute raw samples.
 
-> 结论先行：**`sleep / deep_sleep / rem_sleep` 这三个名字是错的。** 它们既不是每分钟的
-> 睡眠时长，也不是睡眠阶段码。证据如下（全部来自 Mi Band 6 真机，1920 条分钟样本）。
+> Conclusion first: **the names `sleep / deep_sleep / rem_sleep` are wrong.** They are neither the
+> per-minute sleep duration nor sleep stage codes. The evidence follows (all from a real Mi Band 6,
+> 1920 minute samples).
 
-## 1. 字段偏移是对的，命名是错的
+## 1. The field offsets are right; the names are wrong
 
-真机 8 字节/分钟的布局与 Gadgetbridge 的 `HuamiExtendedActivitySample` 完全一致：
+The real device layout of 8 bytes/minute is exactly the same as Gadgetbridge's `HuamiExtendedActivitySample`:
 
-| 偏移 | 字段 | 说明 |
+| Offset | Field | Description |
 |---|---|---|
-| 0 | `kind` | 手环自己的活动状态机，见 §3 |
-| 1 | `intensity` | 活动强度 0–149 |
-| 2 | `steps` | 该分钟步数 0–116 |
-| 3 | `heart_rate` | 该分钟心率，`255` = 无测量 |
-| 4 | `unknown1` | 0–63，12 个取值，语义未知 |
+| 0 | `kind` | The band's own activity state machine, see §3 |
+| 1 | `intensity` | Activity intensity 0–149 |
+| 2 | `steps` | Steps in that minute 0–116 |
+| 3 | `heart_rate` | Heart rate for that minute, `255` = no measurement |
+| 4 | `unknown1` | 0–63, 12 distinct values, semantics unknown |
 | 5 | `sleep` | 0–62 |
-| 6 | `deep_sleep` | 恒 ≥128（`0x80` 置位），有效值 0–64 |
-| 7 | `rem_sleep` | 恒 ≥128（`0x80` 置位），有效值 0–78 |
+| 6 | `deep_sleep` | Always ≥128 (`0x80` set), effective value 0–64 |
+| 7 | `rem_sleep` | Always ≥128 (`0x80` set), effective value 0–78 |
 
-偏移没错，所以解析器不用改；错的是把 5/6/7 当成「时长」。
+The offsets are correct, so the parser does not need changing; what is wrong is treating 5/6/7 as
+"durations".
 
-## 2. 为什么它们不是睡眠时长
+## 2. Why they are not sleep durations
 
-1. **不单调**。如果是「今晚累计睡了多久」，整夜必须单调递增到 300+ 分钟。实际值整夜在
-   13–68 之间来回摆动，最大只有 68。
-2. **是平滑模拟量，不是离散阶段**。相邻分钟的平均变化只有 1.21 / 2.34 / 2.83，
-   最大值 31–60 —— 这是滤波后的连续值，不是 0/1/2/3 的阶段码。
-3. **位打包假设不成立**。按 2 bit 分组看分布，`deep_sleep` 的最高两位 1073/1074 都是 `10`
-   （即 `0x80` 恒定），其余位均匀散开，不存在「每 2 bit 一个阶段」的结构。
-4. **只在特定状态下有值**。`kind=243` 的 679 分钟里 `deep/rem` 100% 为 0x80；`kind=240`
-   的 330 分钟里 99.7% 非零。也就是说这两个字节是否有值，取决于 `kind` 的低 2 位。
+1. **Not monotonic.** If they were "how long I have slept so far tonight", they would have to rise
+   monotonically to 300+ minutes over the night. The actual values oscillate between 13–68 all
+   night, with a maximum of only 68.
+2. **They are smooth analog quantities, not discrete stages.** The average change between adjacent
+   minutes is only 1.21 / 2.34 / 2.83, with a maximum of 31–60 — these are continuous values after
+   filtering, not stage codes of 0/1/2/3.
+3. **The bit-packing hypothesis does not hold.** Looking at the distribution in 2-bit groups, the
+   top two bits of `deep_sleep` are `10` in all 1073/1074 cases (i.e. `0x80` is constant) and the
+   remaining bits are spread evenly; there is no structure of "one stage per 2 bits".
+4. **They only have values in specific states.** In the 679 minutes with `kind=243`, `deep/rem` are
+   100% 0x80; in the 330 minutes with `kind=240`, 99.7% are non-zero. That is, whether these two
+   bytes have values depends on the low 2 bits of `kind`.
 
-第 4 点最有意思，也最能说明问题：同一夜的前半夜（`kind=240`，330 分钟）有值，后半夜
-（`kind=243`，461 分钟）全零。**连续两个夜晚中，第一夜 463 分钟有值、第二夜 0 分钟有值。**
+Point 4 is the most interesting and the most telling: on the same night, the first half
+(`kind=240`, 330 minutes) has values while the second half (`kind=243`, 461 minutes) is all zeros.
+**Across two consecutive nights, the first night had values for 463 minutes and the second night
+had values for 0 minutes.**
 
-推测（未验证）：这两个字节是手环侧「睡眠分期结果」的缓存，只有在某个内部状态完成后才写入，
-或者需要 Zepp App 侧开启「科学睡眠监测」。由于我们从不运行 Zepp，第二夜可能因为分期尚未
-计算而保持 0x80（= 0）。
+Speculation (unverified): these two bytes are a cache of the band-side "sleep staging result",
+written only after some internal state completes, or requiring "scientific sleep monitoring" to be
+enabled on the Zepp App side. Since we never run Zepp, the second night may stay at 0x80 (= 0)
+because staging has not been computed yet.
 
-**因此不能声称它们就是深睡/REM 时长；把拟合出来的映射写死，就是本项目之前 IMU 那个
-「模拟器和解析器共享同一套错误假设」的翻版。**
+**So we cannot claim they are deep-sleep/REM durations; hard-coding a fitted mapping would repeat
+this project's earlier IMU mistake where "the simulator and the parser shared the same wrong
+assumptions".**
 
-## 3. `kind` 才是可用的睡眠信号
+## 3. `kind` is the usable sleep signal
 
-`kind` 是手环自己的状态机输出，1920 分钟里出现 27 个取值，按位看结构很清楚：
+`kind` is the output of the band's own state machine; 27 distinct values appear across 1920 minutes,
+and the bit-level structure is clear:
 
-| kind | 位模式 | 出现时段 | 特征 |
+| kind | Bit pattern | When it appears | Characteristics |
 |---|---|---|---|
-| 240 | `1111 0000` | 整夜 | 睡眠，`deep/rem` 字节有值 |
-| 249/250 | `1111 1001` / `1111 1010` | 夜里短暂 | 睡眠中的转换 |
-| **243** | `1111 0011` | **整夜 679 分钟** | **未佩戴**（见 §6），不是睡眠 |
-| 112 | `0111 0000` | 夜里、入睡前 | 静止 |
-| 80 | `0101 0000` | 白天久坐 / 夜里醒着 | 静止 |
-| 96 | `0110 0000` | 白天 | 静止 |
-| 1 / 16 / 17 | `0000 0001` / `0001 0000` / `0001 0001` | 白天 | 走路（步数明显） |
-| 224 / 129 / 144 | `1110 0000` / `1000 0001` / `1001 0000` | 夜间短暂 | 翻身/觉醒 |
+| 240 | `1111 0000` | all night | sleep, `deep/rem` bytes have values |
+| 249/250 | `1111 1001` / `1111 1010` | briefly at night | transitions during sleep |
+| **243** | `1111 0011` | **679 minutes across the night** | **not worn** (see §6), not sleep |
+| 112 | `0111 0000` | at night, before sleep onset | still |
+| 80 | `0101 0000` | daytime sitting / awake at night | still |
+| 96 | `0110 0000` | daytime | still |
+| 1 / 16 / 17 | `0000 0001` / `0001 0000` / `0001 0001` | daytime | walking (steps obvious) |
+| 224 / 129 / 144 | `1110 0000` / `1000 0001` / `1001 0000` | briefly at night | turning over / awakening |
 
-**判据：`kind & 0xF0 == 0xF0` 即高四位全 1，是手环的睡眠家族**（240/249/250 命中，白天一次
-都没有命中）。但该家族里 `0xF3` 是例外——Gadgetbridge 对同一字节做 `rawKind & 0x0f`，
-低四位 `3` 是 `TYPE_NONWEAR`，真机数据独立支持这一点（见 §6.2）。
+**Criterion: `kind & 0xF0 == 0xF0`, i.e. the top four bits are all 1, is the band's sleep family**
+(240/249/250 hit it; it never hit once during the day). But within that family `0xF3` is the
+exception — Gadgetbridge applies `rawKind & 0x0f` to the same byte, where a low nibble of `3` is
+`TYPE_NONWEAR`; real-device data independently supports this (see §6.2).
 
-## 4. 所以睡眠分期怎么做
+## 4. So how is sleep staging done
 
-用三个可靠信号推导，而不是猜字段：
+Derive from three reliable signals instead of guessing at fields:
 
-- **睡眠窗口**：`kind & 0xF0 == 0xF0` 的连续段，允许中间夹少量静止分钟；
-- **觉醒**：段内 `steps > 0` 或 `intensity ≥ 20`；
-- **深睡 / REM**：用整段睡眠的心率分布分位（深睡 = 低分位且无体动，
-  REM = 高分位且无体动），并用最短持续时长做平滑。
+- **Sleep window**: continuous runs of `kind & 0xF0 == 0xF0`, tolerating a few still minutes in
+  between;
+- **Awakening**: within a run, `steps > 0` or `intensity ≥ 20`;
+- **Deep sleep / REM**: use the heart-rate distribution quantiles over the whole sleep run (deep
+  sleep = low quantile with no body movement, REM = high quantile with no body movement), and
+  smooth them with a minimum duration.
 
-实现见 [`miband_monitor/sleep/`](../../miband_monitor/sleep/)，推导结果一律带 `derived: true` 标记，
-与手环原始字段严格区分。
+The implementation is in [`miband_monitor/sleep/`](../../miband_monitor/sleep/); derivation results
+are always marked `derived: true` and kept strictly distinct from the band's raw fields.
 
-> 这份推导是**启发式**的：腕部只有心率与体动，没有 EEG，真正的分期准确率上限就在那里。
-> 它的价值在于趋势与结构（入睡/醒来时间、总时长、深睡比例、夜间觉醒次数），
-> 不是逐分钟的医学判读。
+> This derivation is **heuristic**: the wrist has only heart rate and body movement, no EEG, so the
+> accuracy ceiling for true staging lies right there. Its value is in trends and structure (sleep
+> onset/wake times, total duration, deep-sleep ratio, number of night awakenings), not per-minute
+> medical interpretation.
 
-## 5. 这三字节到底是什么：逐分钟阶段分数
+## 5. What these three bytes actually are: per-minute stage scores
 
-上一节只证明了"不是时长"。用 01-06 夜（365 个睡眠分钟，有心率）和 01-07 夜
-（680 分钟，**整夜没有一条心率**）做对照，可以进一步排除三种猜测，并锁定一种读法。
+The previous section only proved "not a duration". Comparing the 01-06 night (365 sleep minutes,
+with heart rate) against the 01-07 night (680 minutes, **not a single heart-rate reading all
+night**) can rule out three further hypotheses and pin down one reading.
 
-### 5.1 排除：不是计数器，不是打包位，不是概率分割
+### 5.1 Excluded: not a counter, not packed bits, not a probability split
 
-| 假设 | 反证 |
+| Hypothesis | Counter-evidence |
 | --- | --- |
-| 累计分钟数 | 逐分钟差分平均为 0（+0.00 / -0.03 / -0.12），从不单调累加；`deep` 在相邻两分钟能从 28 跳到 57 |
-| 2-bit / 4-bit 打包 | 高位模式恒定，1073 与 1074 落在同一"组"，任何打包切分都对不上 |
-| 三者是同一分钟的概率分割 | `corr(浅睡, 深睡+REM) = **+0.20**`，互补要求 ≈ -1；更致命的是无心率夜只有 `浅睡=61`、`深睡=REM=0`，若按分割读，等于宣称那一夜 52% 的时间是清醒——而人整夜在睡 |
-| 与体动无关的"总睡眠得分" | 无心率夜 `浅睡` 稳定在 `61 ± 1` 长达 11 小时，且只有它对体动有反应 |
+| Cumulative minutes | The per-minute difference averages 0 (+0.00 / -0.03 / -0.12) and never accumulates monotonically; `deep` can jump from 28 to 57 between two adjacent minutes |
+| 2-bit / 4-bit packing | The high-bit pattern is constant, 1073 and 1074 fall in the same "group", and no packing split matches |
+| The three are a probability split of the same minute | `corr(light, deep+REM) = **+0.20**`, while complementarity would require ≈ -1; more fatally, on the night without heart rate only `light=61` and `deep=REM=0`, so read as a split that would declare 52% of that night awake — yet the person slept all night |
+| A "total sleep score" unrelated to movement | On the night without heart rate, `light` stays at `61 ± 1` for 11 hours straight, and only it responds to movement |
 
-### 5.2 三列各自的行为
+### 5.2 Behavior of each of the three columns
 
-| 列 | 无心率夜 | 有心率夜（365 分钟） | 与心率 | 与体动 |
+| Column | Night without heart rate | Night with heart rate (365 minutes) | vs heart rate | vs body movement |
 | --- | --- | --- | --- | --- |
-| `sleep`（浅睡） | `61.2 ± 1.0`，整夜不变 | 均值 54.5，中位 57，范围 17–62 | 无关（r = -0.04） | **强相关**：22:22 走了 24 分钟，值从 58 → 17 → 13，随后 5 分钟爬回 52 |
-| `deep_sleep`（深睡） | 全 0 | 均值 35.0，范围 13–54 | **负相关** r = -0.34 | 无关 |
-| `rem_sleep`（REM） | 全 0 | 均值 28.5，范围 13–78 | **正相关** r = +0.23 | 无关 |
+| `sleep` (light sleep) | `61.2 ± 1.0`, unchanged all night | mean 54.5, median 57, range 17–62 | unrelated (r = -0.04) | **strongly correlated**: walked for 24 minutes at 22:22, the value went 58 → 17 → 13, then climbed back to 52 over the next 5 minutes |
+| `deep_sleep` (deep sleep) | all 0 | mean 35.0, range 13–54 | **negative correlation** r = -0.34 | unrelated |
+| `rem_sleep` (REM) | all 0 | mean 28.5, range 13–78 | **positive correlation** r = +0.23 | unrelated |
 
-分档看更清楚（夜 1）：
+Binned, it becomes clearer (night 1):
 
-| 当分钟心率 | 深睡均值 | REM 均值 |
+| Heart rate in that minute | Deep-sleep mean | REM mean |
 | --- | --- | --- |
 | 45–49 | 38.3 | 27.1 |
 | 50–54 | 34.6 | 26.8 |
@@ -111,58 +131,70 @@
 | 60–64 | 26.9 | 35.1 |
 | 65–69 | 19.6 | 49.8 |
 
-深睡与 REM **反向单调**、彼此 `r = -0.43`：这是一对竞争判别项的输出，
-不像两个独立测量。结论：**`deep_sleep`/`rem_sleep` 是手环用当分钟心率算出来的
-阶段判别分数，没有心率就算不出来；`sleep` 是只用体动算的浅睡分数。**
+Deep sleep and REM are **inversely monotonic** with `r = -0.43` between them: this is the output
+of a pair of competing discriminants, unlike two independent measurements. Conclusion:
+**`deep_sleep`/`rem_sleep` are stage-discrimination scores computed by the band from that minute's
+heart rate; without heart rate they cannot be computed; `sleep` is a light-sleep score computed
+from body movement alone.**
 
-### 5.3 当时的候选读法：`分数 / 128` = 该分钟归给这一阶段的比例
+### 5.3 The candidate reading at the time: `score / 128` = proportion of that minute attributed to this stage
 
-> **本节已被 §7 推翻。** 当时只有内部一致性证据（三类合计 329 分钟，约等于体动判定的
-> 在睡 328 分钟），看起来自洽。拿到 Zepp Life 的实测数字后：App 报深睡 44 分钟，
-> 本节积出 96 分钟。Zepp 那一页也没有 REM 栏，但原因不是它不支持 REM（§8 推翻了
-> 这个判断），而是那一夜 REM 为 0。数字自洽不等于语义正确，保留本节作为过程记录。
+> **This section was overturned by §7.** At the time there was only internal-consistency evidence
+> (the three categories summed to 329 minutes, roughly equal to the 328 minutes of sleep judged by
+> body movement), and it looked self-consistent. After obtaining Zepp Life's measured numbers: the
+> app reported 44 minutes of deep sleep, while this section integrated 96 minutes. That Zepp page
+> also had no REM row, but the reason is not that it does not support REM (§8 overturns that
+> judgment), but that REM was 0 that night. Numerical self-consistency does not equal semantic
+> correctness; this section is kept as a record of the process.
 
-三个字节都落在 0–127（`deep`/`rem` 的 bit7 是"已评分"标记），把 `值/128`
-当成该分钟的阶段占比，积分可得期望分钟数（夜 1，357 分钟窗口）：
+All three bytes fall in 0–127 (bit7 of `deep`/`rem` is a "scored" flag); treating `value/128` as
+the stage proportion of that minute and integrating gives expected minutes (night 1, 357-minute
+window):
 
-| 阶段 | 积分分钟 | 占比 |
+| Stage | Integrated minutes | Proportion |
 | --- | --- | --- |
-| 浅睡 | 151 | 42% |
-| 深睡 | 96 | 27% |
+| Light sleep | 151 | 42% |
+| Deep sleep | 96 | 27% |
 | REM | 82 | 23% |
-| 未归属 | 28 | 8% |
+| Unattributed | 28 | 8% |
 
-- 三类合计 329 分钟，与"按体动判定的在睡 328 分钟"差 1 分钟；
-- 未归属 28 分钟，与按体动判定的清醒 29 分钟差 1 分钟；
-- 深睡 27% / REM 23% 落在生理先验内（腕表算法一般报 20–30%）。
+- The three categories sum to 329 minutes, 1 minute away from "328 minutes asleep as judged by body
+  movement";
+- Unattributed is 28 minutes, 1 minute away from "29 minutes awake as judged by body movement";
+- Deep sleep 27% / REM 23% falls inside physiological priors (wristwatch algorithms generally
+  report 20–30%).
 
-同一夜用第 4 节的启发式（心率分位 + HRV 分位）得到的是深睡 40 分钟（12%）、
-REM 55 分钟（17%）——深睡明显偏低。两套结果差在深睡/REM 的切分上，
-这正是需要 Zepp 的实测数字来裁决的地方。
+For the same night, the heuristic of §4 (heart-rate quantile + HRV quantile) gives 40 minutes of
+deep sleep (12%) and 55 minutes of REM (17%) — deep sleep is clearly too low. The two results differ
+in the deep-sleep/REM split, which is exactly where Zepp's measured numbers are needed to
+adjudicate.
 
-### 5.4 与 Zepp 的对接：读一次就能定案
+### 5.4 Interfacing with Zepp: one reading settles it
 
-Zepp 的**时间**是这三列的积分结果，**得分**是 app 在时间之上另算的加权分
-（时长、效率、比例），不可能从三列唯一反解。所以只核**时间**：
+Zepp's **time** is the integrated result of these three columns, while the **score** is an additional
+weighted score the app computes on top of time (duration, efficiency, ratios); it is impossible to
+invert uniquely from the three columns. So only verify **time**:
 
-| 若 Zepp 这一夜显示 | 则说明 |
+| If Zepp shows for that night | Then it means |
 | --- | --- |
-| 深睡 ≈ 1 小时 36 分、REM ≈ 1 小时 22 分、浅睡 ≈ 2 小时 31 分 | 5.3 的 1/128 积分读法成立，可直接替掉启发式 |
-| 深睡 ≈ 40 分钟、REM ≈ 55 分钟 | 启发式的分位切分更接近 Zepp，三列只当趋势用 |
-| 三者都不是 | 三列是别的量（例如手环侧缓存的分期结果），需要再找映射 |
+| Deep sleep ≈ 1 h 36 min, REM ≈ 1 h 22 min, light sleep ≈ 2 h 31 min | the 1/128 integration reading of 5.3 holds and can directly replace the heuristic |
+| Deep sleep ≈ 40 min, REM ≈ 55 min | the heuristic's quantile split is closer to Zepp; use the three columns only as trends |
+| None of the above | the three columns are some other quantity (e.g. band-side cached staging results); another mapping must be found |
 
-`python -m sleep_analysis --db mi_band.db` 会把两套数字并排打印（`band scores` 一行），
-`docs/guides/usage.md` 的睡眠推导一节有完整参数。
+`python -m sleep_analysis --db mi_band.db` prints both sets of numbers side by side (the
+`band scores` line); the sleep derivation section of `docs/guides/usage.md` has the full parameters.
 
-## 6. Gadgetbridge 源码核对（2020-01-08，master `db00876`）
+## 6. Cross-check against the Gadgetbridge source (2020-01-08, master `db00876`)
 
-这一节是**外部证据**，不是推断：Gadgetbridge 用同一套 Huami 协议，代码可直接查阅。
-核对结论有四条，其中两条推翻/修正了本文档前面的说法。
+This section is **external evidence**, not inference: Gadgetbridge uses the same Huami protocol and
+its code can be consulted directly. The cross-check yields four conclusions, two of which
+overturn/correct statements made earlier in this document.
 
-### 6.1 8 字节布局逐字段一致
+### 6.1 The 8-byte layout matches field by field
 
-`service/devices/huami/operations/fetch/FetchActivityOperation.java:152` 的
-`createExtendedSample()` 按顺序读 8 个字节，命名与本项目完全相同：
+`createExtendedSample()` in
+`service/devices/huami/operations/fetch/FetchActivityOperation.java:152` reads 8 bytes in order,
+with naming identical to this project:
 
 ```java
 huamiExtendedActivitySample.setRawKind(value[i] & 0xff);
@@ -175,45 +207,51 @@ huamiExtendedActivitySample.setDeepSleep(value[i + 6] & 0xff);
 huamiExtendedActivitySample.setRemSleep(value[i + 7] & 0xff);
 ```
 
-而小米手环 6 确实走这条路径：`MiBand6Support.getActivitySampleSize()` 返回 `8`。
-**本项目对 `unknown1` 的命名和位置也因此得到确认。**
+And the Mi Band 6 does take this path: `MiBand6Support.getActivitySampleSize()` returns `8`.
+**This project's naming and position for `unknown1` are therefore confirmed as well.**
 
-### 6.2 `kind` 的低四位才是活动码，`3` = 未佩戴
+### 6.2 The low nibble of `kind` is the activity code; `3` = not worn
 
-`MiBand2SampleProvider.postprocess()` 对每一分钟做 `rawKind &= 0xf`，再按
-`HuamiConst` 映射：`1` 活动、`3` **未佩戴**、`9` 浅睡、`10` 忽略、`11` 深睡、`12` 醒来、
-`0` 无变化。同一文件里那句注释正好点出我们数据里的高频值：
+`MiBand2SampleProvider.postprocess()` does `rawKind &= 0xf` for each minute, then maps through
+`HuamiConst`: `1` activity, `3` **not worn**, `9` light sleep, `10` ignore, `11` deep sleep,
+`12` wake, `0` no change. The comment in the same file points exactly at the high-frequency
+values in our data:
 
 ```java
 // all I ever had that are 0 when doing &=0xf
 RawKind.notIn(TYPE_NO_CHANGE, TYPE_IGNORE, TYPE_UNSET, 16, 80, 96, 112)
 ```
 
-`16 / 80 / 96 / 112` 正是本项目 1920 分钟里的高频 kind——两条独立路径对上了同一批字节。
+`16 / 80 / 96 / 112` are exactly the high-frequency kinds among this project's 1920 minutes — two
+independent paths agree on the same set of bytes.
 
-**这条修正了本文档 §3 的判据。** 之前把 `kind & 0xF0 == 0xF0` 一律当睡眠，而
-`243 (0xF3)` 的低四位是 `3`。真机数据独立支持「未佩戴」这个读法：
+**This corrects the criterion in §3 of this document.** Previously `kind & 0xF0 == 0xF0` was
+uniformly treated as sleep, whereas the low nibble of `243 (0xF3)` is `3`. Real-device data
+independently supports the "not worn" reading:
 
-| kind | 分钟数 | 有有效心率 | 零强度且零步数 |
+| kind | Minutes | Has valid heart rate | Zero intensity and zero steps |
 | --- | --- | --- | --- |
-| 240 (0xF0) | 330 | **329（99.7%）** | 266 |
-| 249 (0xF9) | 9 | 9（100%） | 3 |
-| 250 (0xFA) | 27 | 27（100%） | 27 |
-| **243 (0xF3)** | **679** | **0（0.0%）** | **679** |
-| 115 (0x73) | 18 | 0（0.0%） | 18 |
+| 240 (0xF0) | 330 | **329 (99.7%)** | 266 |
+| 249 (0xF9) | 9 | 9 (100%) | 3 |
+| 250 (0xFA) | 27 | 27 (100%) | 27 |
+| **243 (0xF3)** | **679** | **0 (0.0%)** | **679** |
+| 115 (0x73) | 18 | 0 (0.0%) | 18 |
 
-PPG 需要皮肤接触：没戴在手腕上就一条心率都测不到；放在桌上也不会动。679 分钟同时满足
-「零心率 + 零位移」，其余每个 kind 都约 100% 有心率——所以 01-07 20:08 → 01-08 07:40
-那一夜不是「卧床 11.3 小时」，而是**手环没戴**。`sleep_analysis.py` 与看板据此改成
-「未佩戴」，不再为那一夜生成睡眠段。
+PPG needs skin contact: with the band off the wrist not a single heart-rate reading can be
+measured, and it does not move when left on a table either. The 679 minutes simultaneously satisfy
+"zero heart rate + zero displacement", while almost every other kind has heart rate about 100% of
+the time — so the night of 01-07 20:08 → 01-08 07:40 was not "11.3 hours in bed" but **the band was
+not worn**. `sleep_analysis.py` and the dashboard were changed accordingly to "not worn" and no
+longer generate a sleep segment for that night.
 
-这条判据后来得到**佩戴状态独立确认**，
-与 PPG 的物理约束相互独立：一个是数据侧的必然（测不到脉搏就是没接触皮肤），一个是独立的佩戴状态核对。
-两路一致，`0xF3` = 未佩戴可以当定论用了。
+This criterion was later **independently confirmed by wear status**, which is independent of PPG's
+physical constraint: one is a necessity on the data side (no measurable pulse means no skin
+contact), the other is an independent wear-status check. Both agree, so `0xF3` = not worn can be
+taken as settled.
 
-### 6.3 Gadgetbridge 也没解开这三字节，只是给了阈值
+### 6.3 Gadgetbridge did not solve these three bytes either; it only gave thresholds
 
-`devices/huami/HuamiExtendedSampleProvider.java:124` 的注释与代码：
+The comment and code of `devices/huami/HuamiExtendedSampleProvider.java:124`:
 
 ```java
 // Fallback to the old threshold-based approach, which is not accurate
@@ -225,42 +263,47 @@ if (sample.getRemSleep() > 55) { ... REM ... }
 else if (sample.getDeepSleep() > 42) { ... deep ... }
 ```
 
-三点值得记下：
+Three points worth noting:
 
-1. 它同样把 bit7 当标记位（`& 127`），与 §5 的判断一致；
-2. 它同样**不**把这三字节当时长，而是当**每分钟的评分**比较阈值——和 §5.3 的读法属于
-   同一族，只是「阈值计数」而非「1/128 积分」；
-3. 作者自己写明这些阈值是 **arbitrary**、这套方法是 **not accurate**。
+1. It likewise treats bit7 as a flag (`& 127`), consistent with §5's judgment;
+2. It likewise does **not** treat these three bytes as durations, but as **per-minute scores**
+   compared against thresholds — the same family as the 5.3 reading, only "threshold counting"
+   rather than "1/128 integration";
+3. The author explicitly writes that these thresholds are **arbitrary** and that the method is
+   **not accurate**.
 
-把这套阈值套到本项目 01-06 夜（365 个睡眠分钟）会得到：浅睡 203、深睡 128（35%）、
-REM 34（9.3%）。深睡 35% / REM 9% 偏离生理常理（REM 一夜 4–5 个周期，不可能只有 9%），
-而 1/128 积分给出深睡 27% / REM 22%。**结论：Gadgetbridge 的 42/55 常量是从别的机型拟出来的，
-不能当作小米手环 6 的答案。**
+Applying this threshold scheme to this project's 01-06 night (365 sleep minutes) gives: light sleep
+203, deep sleep 128 (35%), REM 34 (9.3%). Deep sleep 35% / REM 9% deviates from physiological common
+sense (REM has 4–5 cycles per night and cannot be only 9%), whereas 1/128 integration gives deep
+sleep 27% / REM 22%. **Conclusion: Gadgetbridge's 42/55 constants were fitted from other models and
+cannot be taken as the answer for the Mi Band 6.**
 
-### 6.4 手环侧的真实分期走另一条命令，小米手环 6 没有
+### 6.4 The real staging on the band side goes through another command, which the Mi Band 6 does not have
 
-Gadgetbridge 首选路径是抓 `SLEEP_SESSION`（fetch type `0x48`），每条记录 594 字节
-（`HuamiSleepSessionSampleProvider.SleepSession`）：
+Gadgetbridge's preferred path fetches `SLEEP_SESSION` (fetch type `0x48`); each record is 594 bytes
+(`HuamiSleepSessionSampleProvider.SleepSession`):
 
-| 偏移 | 类型 | 含义 |
+| Offset | Type | Meaning |
 | --- | --- | --- |
-| `0x000` | u32 | 会话时间戳 |
-| `0x004` | u32 | 当天零点（本地时区） |
-| `0x00a` / `0x00c` | u16 | 睡眠起 / 止（距前一日正午的分钟数） |
-| `0x015` | u8 | 平均心率 |
-| `0x016` | u8 | **睡眠得分** |
-| `0x054` | u8 | 分期段数（≤100） |
-| `0x056` | 5×n | 每段 `u16 起, u16 止, u8 类型`，类型 `4` 浅睡 / `5` 深睡 / `7` 清醒 / `8` REM |
-| `0x24a`–`0x250` | u16×4 | REM / 浅睡 / 深睡 / 清醒 总分钟数 |
+| `0x000` | u32 | Session timestamp |
+| `0x004` | u32 | Midnight of that day (local time zone) |
+| `0x00a` / `0x00c` | u16 | Sleep start / end (minutes since noon of the previous day) |
+| `0x015` | u8 | Average heart rate |
+| `0x016` | u8 | **Sleep score** |
+| `0x054` | u8 | Number of stage segments (≤100) |
+| `0x056` | 5×n | Per segment `u16 start, u16 end, u8 type`; type `4` light / `5` deep / `7` awake / `8` REM |
+| `0x24a`–`0x250` | u16×4 | REM / light / deep / awake total minutes |
 
-结构自洽：`0x56 + 5×100 = 0x24a`，100 个分期槽正好填到汇总字段，594 刚好结尾。这才是
-Zepp 那套「睡眠时间 / 深睡时间 / 浅睡时间 + 得分」的来源。
+The structure is self-consistent: `0x56 + 5×100 = 0x24a`; the 100 staging slots exactly fill up to the
+summary fields, and 594 lands exactly at the end. This is where Zepp's "sleep time / deep sleep time
+/ light sleep time + score" comes from.
 
-但 **Gadgetbridge 不会对手环 6 发这条命令**：`HuamiFetcher.java:101` 要求
-`coordinator.supportsSleepScore(device)`，而该方法的默认实现返回 `false`，
-`MiBand6Coordinator` 没有覆盖它（只有 ZeppOS 机型如 Band 7、Bip 5、GTR3 覆盖为 `true`）。
+But **Gadgetbridge does not send this command to the band 6**: `HuamiFetcher.java:101` requires
+`coordinator.supportsSleepScore(device)`, while that method's default implementation returns
+`false` and `MiBand6Coordinator` does not override it (only ZeppOS models such as Band 7, Bip 5 and
+GTR3 override it to `true`).
 
-**真机验证**（`tools/probe_fetch_types.py`，2020-01-08）：
+**Real-device verification** (`tools/probe_fetch_types.py`, 2020-01-08):
 
 ```
 type 0x48: reply 10010100000000b207010100000000   accepted, declares 0
@@ -268,179 +311,211 @@ type 0x2c: reply 10010100000000b207010100000000   accepted, declares 0
 type 0x01: reply 100101db070000ea070b0117070020   accepted, declares 2011
 ```
 
-`0x48` 与 `0x2c` 都是 status `0x01`（成功）但声明 0 条、并回一个 1970-01-01 的日历——
-协议层认识这个类型，固件里没有数据。作为对照，`0x01` 声明 2011 分钟并回了真实日历。
-**小米手环 6 的固件根本不产出睡眠会话记录**，与 Gadgetbridge 不给它请求的行为吻合。
+`0x48` and `0x2c` both have status `0x01` (success) but declare 0 records and return a 1970-01-01
+calendar — the protocol layer recognizes this type, but the firmware has no data. By contrast
+`0x01` declares 2011 minutes and returns a real calendar. **The Mi Band 6 firmware does not produce
+sleep session records at all**, which matches Gadgetbridge's behavior of not requesting them from
+it.
 
-### 6.5 Gadgetbridge 自己也在用「推导」
+### 6.5 Gadgetbridge is itself using "derivation"
 
-对拿不到会话记录的设备，Gadgetbridge 的最新做法是 `util/sleep/SleepStageEstimator.kt`
-（近期新增）：醒/睡用 Cole-Kripke 权重 + Webster 重打分，分期用心率相对**滑动基线**的
-偏移、心率变异性、时间先验（深睡偏前半夜、REM 偏后半夜）加上体动惩罚，最后用
-「深睡占比 10–25%、REM 15–30%」的闭环把阈值自适应调进去。
+For devices that cannot obtain session records, Gadgetbridge's latest approach is
+`util/sleep/SleepStageEstimator.kt` (added recently): wake/sleep uses Cole-Kripke weights plus
+Webster rescoring; staging uses the deviation of heart rate from a **rolling baseline**, heart-rate
+variability, time priors (deep sleep biased toward the first half of the night, REM toward the
+second half) plus a movement penalty, and finally a closed loop with "deep sleep share 10–25%, REM
+15–30%" that adapts the thresholds into that range.
 
-它**完全不读那三个字节**，文件头自己写着 *"This is a heuristic without ground truth.
-Read the stages as 'when heart rate was low and steady versus high and variable', not as a
-sleep lab."*
+It **does not read those three bytes at all**; the file header itself says *"This is a heuristic
+without ground truth. Read the stages as 'when heart rate was low and steady versus high and
+variable', not as a sleep lab."*
 
-与本项目现有启发式（心率分位 + HRV 分位）属于同一族，但它的工程化更完整。值得借鉴的
-两点：① 用**滚动基线偏移**而不是全局排名，能跟上「整夜心率持续下降」；② 用占比闭环
-自适应调阈值，而不是固定分位——后者正是本项目深睡只有 12%（偏低）的原因。
+It belongs to the same family as this project's current heuristic (heart-rate quantile + HRV
+quantile), but its engineering is more complete. Two things are worth borrowing: ① use **rolling
+baseline deviation** instead of global ranking, which keeps up with "heart rate continuously
+declining through the night"; ② adapt thresholds with a proportion closed loop instead of fixed
+quantiles — the latter is exactly why this project's deep sleep is only 12% (too low).
 
-### 6.6 这对本项目意味着什么
+### 6.6 What this means for this project
 
-`0x48` 空着，说明**小米手环 6 的固件里没有分期结果**。那么 Zepp 上显示的那一屏
-「深睡 1 小时 36 分」是从哪来的？只能是 App / 云端用同一份活动样本（`kind` + 那三个字节
-+ 心率）**算出来的**——这与 Gadgetbridge 对这类设备的做法相同，也与本项目的做法相同。
+`0x48` being empty shows that **there are no staging results in the Mi Band 6 firmware**. So where
+does the "deep sleep 1 h 36 min" screen shown on Zepp come from? It can only have been **computed**
+by the app/cloud from the same activity samples (`kind` + those three bytes + heart rate) — the same
+as what Gadgetbridge does for such devices, and the same as what this project does.
 
-所以 §5.4 的裁决方式依然成立，而且更明确了：**Zepp 上那一夜的深睡/REM 时长，是唯一能把
-「1/128 积分」和「阈值计数」两套读法分开的外部证据**，因为两边吃的是同一批原始字节。
+So the adjudication method of §5.4 still holds, and is now even clearer: **the deep-sleep/REM
+durations for that night on Zepp are the only external evidence that can separate the "1/128
+integration" and "threshold counting" readings**, because both sides consume the same set of raw
+bytes.
 
-| 若 Zepp 01-06 夜显示 | 说明 |
+| If Zepp shows for the 01-06 night | Meaning |
 | --- | --- |
-| 深睡 ≈ 1 小时 36 分（96）、REM ≈ 1 小时 22 分（82）、浅睡 ≈ 2 小时 31 分（151） | 1/128 积分读法与 Zepp 一致，可以替掉启发式 |
-| 深睡 ≈ 2 小时 08 分（128）、REM ≈ 34 分 | Gadgetbridge 的 42/55 阈值读法与 Zepp 一致 |
-| 深睡 ≈ 40 分、REM ≈ 55 分 | 本项目现有启发式更接近 Zepp，三个字节只当趋势用 |
-| 都不是 | 三字节与 Zepp 的分期无关，Zepp 用了别的信号（如加速度原始序列） |
+| Deep sleep ≈ 1 h 36 min (96), REM ≈ 1 h 22 min (82), light sleep ≈ 2 h 31 min (151) | the 1/128 integration reading agrees with Zepp and can replace the heuristic |
+| Deep sleep ≈ 2 h 08 min (128), REM ≈ 34 min | Gadgetbridge's 42/55 threshold reading agrees with Zepp |
+| Deep sleep ≈ 40 min, REM ≈ 55 min | this project's current heuristic is closer to Zepp; use the three bytes only as trends |
+| None of the above | the three bytes are unrelated to Zepp's staging; Zepp used other signals (e.g. the raw acceleration series) |
 
-## 7. Zepp Life 的实测数字：三个字节不是阶段时长（2020-01-08）
+## 7. Zepp Life's measured numbers: the three bytes are not stage durations (2020-01-08)
 
-对照用的 Zepp Life 睡眠页，把前面所有假设一次性裁决了。
-页面原文：**睡眠得分 73**（胜过 34% 的用户）、**8 时 40 分**、**深睡 44 分钟（8%）**、
-**浅睡 7 时 56 分（92%）**、**清醒 20 分钟**、零星小睡 0 分钟，时间轴 21:06 → 06:06。
+The Zepp Life sleep page used for comparison adjudicated all the earlier hypotheses at once. The
+original page text: **sleep score 73** (better than 34% of users), **8 h 40 min**, **deep sleep 44
+minutes (8%)**, **light sleep 7 h 56 min (92%)**, **awake 20 minutes**, naps 0 minutes, timeline
+21:06 → 06:06.
 
-注意这一页**没有 REM 栏**。当时我据此写成"这款机型不支持 REM"，**这个结论在 §8 被推翻**：
-Zepp 是有 REM 一档的（01-07 那页显示 1 时 27 分 / 23%），这一页缺栏是因为 REM 为 0 时 UI
-不显示。8h40m + 20min = 9h00m 正好等于 21:06 → 06:06，这几个数字本身是自洽的。
+Note that this page **has no REM row**. At the time I wrote "this model does not support REM" based
+on it, **and that conclusion was overturned in §8**: Zepp does have a REM category (the 01-07 page
+shows 1 h 27 min / 23%); the row is missing on this page because the UI does not show it when REM is
+0. 8h40m + 20min = 9h00m exactly equals 21:06 → 06:06; these numbers are self-consistent.
 
-### 7.1 三种读法对照
+### 7.1 Comparison of the three readings
 
-01-06 夜我们同步到的部分是 22:06 → 06:06（481 分钟），21:06-22:06 那一小时不在库里。
-按此折算，Zepp 在该重叠区间应为：睡眠约 460 分钟、深睡 44 分钟（那一小时里的深睡未知，
-所以 44 是上界）。
+For the night of 01-06, the part we synced is 22:06 → 06:06 (481 minutes); the hour 21:06-22:06 is
+not in the database. Scaled on that basis, Zepp should show about 460 minutes of sleep and 44
+minutes of deep sleep in the overlapping interval (deep sleep in that hour is unknown, so 44 is an
+upper bound).
 
-| 读法 | 深睡 | 两者占比 | 结论 |
+| Reading | Deep sleep | Proportions of both | Conclusion |
 | --- | --- | --- | --- |
-| `分数/128` 积分 | 96 分钟 | 深 27% / REM 23% | **否**：深睡差 52 分钟，且把 REM 算成 82 分钟（那一夜 App 报 0） |
-| Gadgetbridge 阈值（REM>55 / 深睡>42） | 128 分钟 | 深 35% / REM 9.3% | **否**：深睡差 84 分钟 |
-| 本项目的启发式（旧窗口） | 40 分钟 | 深 12% | 数值最接近，但窗口只有 5.5 小时 |
+| `score/128` integration | 96 minutes | deep 27% / REM 23% | **No**: deep sleep is off by 52 minutes, and it counts REM as 82 minutes (the app reported 0 that night) |
+| Gadgetbridge thresholds (REM>55 / deep>42) | 128 minutes | deep 35% / REM 9.3% | **No**: deep sleep is off by 84 minutes |
+| This project's heuristic (old window) | 40 minutes | deep 12% | numerically closest, but the window is only 5.5 hours |
 
-**三个字节不是阶段时长，这一点至此定案。** 但理由不是"Zepp 没有 REM"——它有（§8）。
-真正的原因在 §8.3：`rem_sleep` 在 01-06 夜（App 报 **0** 分钟 REM）非零 458/485 分钟，
-在 01-07 夜（App 报 **87** 分钟 REM）却全为 `0x80`。方向是反的。
+**The three bytes are not stage durations; this point is now settled.** But the reason is not
+"Zepp has no REM" — it does (§8). The real reason is in §8.3: `rem_sleep` is non-zero for 458/485
+minutes on the 01-06 night (the app reported **0** REM minutes), yet is all `0x80` on the 01-07 night
+(the app reported **87** REM minutes). The direction is reversed.
 
-### 7.2 Zepp 用的其实是体动 + 心率
+### 7.2 What Zepp actually uses is body movement + heart rate
 
-对同一条数据流做反推，Zepp 的三条规则可以精确复现：
+Reverse-engineering the same data stream, Zepp's three rules can be reproduced exactly:
 
-| 量 | Zepp | 我们的数据 | 差别 |
+| Quantity | Zepp | Our data | Difference |
 | --- | --- | --- | --- |
-| 清醒 | 20 分钟 | `steps > 0` 的分钟：**17** | 3 |
-| 睡眠 | 520 分钟 | 481 − 17 = **464**（重叠区间） | 重叠区间应为 460 |
-| 卧床 | 540 分钟（21:06→06:06） | 22:06→06:06 = **480** | 0 |
+| Awake | 20 minutes | minutes with `steps > 0`: **17** | 3 |
+| Sleep | 520 minutes | 481 − 17 = **464** (overlap interval) | the overlap interval should be 460 |
+| In bed | 540 minutes (21:06→06:06) | 22:06→06:06 = **480** | 0 |
 
-对照之下，用 `intensity >= 20` 判清醒会得到 72 分钟（少算 55 分钟真睡眠），用
-`kind & 0xF0 == 0xF0` 判睡眠窗口只能拿到 357 分钟（前后共丢 124 分钟）。所以：
-**清醒 = 有步数，睡眠窗口 = 手环自报睡眠为锚 + 两侧静止延伸**，这就是现在的实现。
+By comparison, judging awake with `intensity >= 20` gives 72 minutes (55 minutes of real sleep
+undercounted), and judging the sleep window with `kind & 0xF0 == 0xF0` gets only 357 minutes (124
+minutes lost at both ends in total). So: **awake = has steps; sleep window = band-reported sleep as
+the anchor + still extension on both sides**; that is the current implementation.
 
-修完之后同一条 01-06 数据的输出：
+The output for the same 01-06 data after the fix:
 
-| 指标 | 我们 | Zepp（按重叠区间折算） |
+| Metric | Ours | Zepp (scaled to the overlap interval) |
 | --- | --- | --- |
-| 卧床 | 22:06 → 05:55，470 分钟 | 22:06 → 06:06，480 分钟 |
-| 睡眠 | 453 分钟 | ~460 分钟 |
-| 清醒 | 17 分钟 | 20 分钟 |
-| 深睡 | 50 分钟（11%） | 44 分钟（8%） |
+| In bed | 22:06 → 05:55, 470 minutes | 22:06 → 06:06, 480 minutes |
+| Sleep | 453 minutes | ~460 minutes |
+| Awake | 17 minutes | 20 minutes |
+| Deep sleep | 50 minutes (11%) | 44 minutes (8%) |
 
-深睡仍偏多 6 分钟。判定阈值（`DEEP_HR_RANK=0.20`、`DEEP_SD_RANK=0.45`）是按这一夜调的，
-**只有一夜样本，属于临时值**，等更多 Zepp 夜晚再收敛。
+Deep sleep is still 6 minutes too much. The decision thresholds (`DEEP_HR_RANK=0.20`,
+`DEEP_SD_RANK=0.45`) were tuned on this night, **only one night of samples, so they are
+provisional values**, to be converged once there are more Zepp nights.
 
-### 7.3 教训
+### 7.3 Lessons
 
-前面几轮一直在"哪个字节对应哪个阶段"里找答案。真正的答案是：**这个机型没有阶段时长
-可读**，App 那边也是用体动和心率现算的。三字节是评分，`kind` 是状态机，两者都不是分期表；
-把任何一方硬解释成分期表，都会得到与 App 对不上的数字。
+Several previous rounds kept looking for the answer in "which byte corresponds to which stage". The
+real answer is: **this model has no readable stage durations**; the app also computes them on the fly
+from body movement and heart rate. The three bytes are scores, `kind` is the state machine, and
+neither is a staging table; forcing either of them to be interpreted as a staging table yields
+numbers that do not match the app.
 
-第二个教训更值得记：**不要用一页 UI 去判断一个设备的能力**。01-06 那页缺 REM 栏，
-我据此断定了"Zepp Life 对这款手环不显示 REM"，这个结论当天就被第三页推翻——缺栏只说明
-那一夜的 REM 是 0。同理，一页数字对不上，也可能说明那一页根本不是这个设备产的（§8.2）。
+The second lesson is more worth recording: **do not judge a device's capabilities from one UI page**.
+The 01-06 page lacked the REM row, and I concluded from it that "Zepp Life does not show REM for
+this band"; that conclusion was overturned the same day by a third page — a missing row only means
+REM was 0 that night. Likewise, when the numbers on one page do not match, it may also mean that
+page was not produced by this device at all (§8.2).
 
-## 8. 再两页 Zepp 数据：REM 确实存在，但这两夜都用不上（2020-01-08 15:55）
+## 8. Two more pages of Zepp data: REM does exist, but neither night is usable (2020-01-08 15:55)
 
-随后补充的两页。它们**同时**推翻了上一节的一个说法、又给出了一条更强的
-反证，但都没能用来校准三个字节。
+The two pages added afterwards. They **simultaneously** overturned a claim in the previous section
+and provided a stronger piece of counter-evidence, but neither could be used to calibrate the three
+bytes.
 
-### 8.1 三页的原文数字
+### 8.1 Original numbers from the three pages
 
-| 日期 | 睡眠得分 | 卧床窗口 | 睡眠 | 深睡 | 浅睡 | REM | 清醒 | 零星小睡 |
+| Date | Sleep score | In-bed window | Sleep | Deep sleep | Light sleep | REM | Awake | Naps |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01-05 | 75（胜 38%） | 21:16 → 05:42（8h26） | 8h05（485） | 44（9%） | 7h21（441，91%） | **无此栏** | 21 | 20 |
-| 01-06 | 73（胜 34%） | 21:06 → 06:06（9h00） | 8h40（520） | 44（8%） | 7h56（476，92%） | **无此栏** | 20 | 0 |
-| 01-07 | 92（胜 90%） | 22:44 → 05:11（6h27） | 6h27（387） | 1h14（74，19%） | 3h46（226，58%） | **1h27（87，23%）** | 0 | 0 |
+| 01-05 | 75 (better than 38%) | 21:16 → 05:42 (8h26) | 8h05 (485) | 44 (9%) | 7h21 (441, 91%) | **no such row** | 21 | 20 |
+| 01-06 | 73 (better than 34%) | 21:06 → 06:06 (9h00) | 8h40 (520) | 44 (8%) | 7h56 (476, 92%) | **no such row** | 20 | 0 |
+| 01-07 | 92 (better than 90%) | 22:44 → 05:11 (6h27) | 6h27 (387) | 1h14 (74, 19%) | 3h46 (226, 58%) | **1h27 (87, 23%)** | 0 | 0 |
 
-三行都自洽：睡眠 + 清醒 = 卧床（485+21=506、520+20=540、387+0=387）。
+All three rows are self-consistent: sleep + awake = in bed (485+21=506, 520+20=540, 387+0=387).
 
-**看到这一页时我据此撤回了"这款手环不显示 REM"的判断——这个撤回又过头了。** 第二天补到
-六夜后（§8.6）可见：手环佩戴的五个夜晚全都没有 REM 栏，唯一有 REM 的那一夜恰好是手环未
-佩戴的一夜。所以上一节的观察（这块手环的夜晚没有 REM）其实成立，我错在把另一台设备的
-页面当成了这台设备的能力。同一条教训一晚上踩了两次，写进 §7.3。
+**On seeing this page I withdrew the judgment that "this band does not show REM" — and that
+withdrawal went too far.** After six nights were added the next day (§8.6) it is visible that all
+five nights when the band was worn have no REM row, and the only night with REM happens to be a
+night when the band was not worn. So the observation in the previous section (this band's nights
+have no REM) actually holds; my mistake was treating another device's page as this device's
+capability. The same lesson was learned twice in one night; it is written into §7.3.
 
-### 8.2 但 01-07 那一夜，手环根本不在手腕上
+### 8.2 But on the night of 01-07, the band was not on the wrist at all
 
-Zepp 的 01-07 窗口（22:44 → 05:11）落在我们的活动历史里，取出来是这样：
+Zepp's 01-07 window (22:44 → 05:11) falls inside our activity history, and fetching it looks like
+this:
 
-| 项 | 值 |
+| Item | Value |
 | --- | --- |
-| 分钟数 | 396（22:44 → 05:11，一分钟不缺） |
-| `kind` | **396/396 全是 `0xF3`（243，未佩戴）** |
-| 心率 | **0/396** |
-| 步数 / 强度 | 全 0 |
-| `deep_sleep` / `rem_sleep` 原始值 | **396/396 都是 `0x80`**（"已评分，值为 0"） |
+| Minutes | 396 (22:44 → 05:11, not a single minute missing) |
+| `kind` | **396/396 all `0xF3` (243, not worn)** |
+| Heart rate | **0/396** |
+| Steps / intensity | all 0 |
+| Raw values of `deep_sleep` / `rem_sleep` | **396/396 all `0x80`** ("scored, value 0") |
 
-放宽到整段未佩戴区间（01-07 20:22 → 01-08 07:40，679 分钟）同样一条心率都没有。PPG 需要
-皮肤接触（§6.2），所以那一夜手环不在手腕上；不在手腕上的手环不可能知道"深睡 74 分钟、
-REM 87 分钟"。
+Widening to the whole not-worn interval (01-07 20:22 → 01-08 07:40, 679 minutes), there is likewise
+not a single heart-rate reading. PPG needs skin contact (§6.2), so the band was not on the wrist
+that night; a band that is not on the wrist cannot know "deep sleep 74 minutes, REM 87 minutes".
 
-**结论：01-07 那页不是这块手环产出的。** 手环整夜未佩戴这一点已经独立确认
-（见 §6.2 末尾），所以那页只能是同一 Zepp 账号下另一台设备的数据 —— 日记页显示的是哪台，
-取决于 Zepp 当天选了哪份记录。
+**Conclusion: the 01-07 page was not produced by this band.** The fact that the band was not worn
+all night has been independently confirmed (see the end of §6.2), so that page can only be data from
+another device under the same Zepp account — which one the diary page shows depends on which record
+Zepp selected that day.
 
-01-05 那一页则连比较的前提都没有：本项目的活动历史从 01-06 22:06 才开始（按 7 天发起请求，
-手环只回了 2011 分钟），那一夜从未同步过。
+The 01-05 page does not even have the precondition for comparison: this project's activity history
+starts only at 01-06 22:06 (the request was issued for 7 days, and the band returned only 2011
+minutes); that night was never synced.
 
-### 8.3 倒挂：三字节的开关是"睡眠窗口 + 心率"，不是阶段
+### 8.3 Inversion: the switch for the three bytes is "sleep window + heart rate", not stage
 
-把两夜并排，结论比上一节更硬：
+Putting the two nights side by side, the conclusion is firmer than in the previous section:
 
-| 夜 | App 报的 REM | `rem_sleep` 低 7 位 | App 报的深睡 | `deep_sleep` 低 7 位 | 心率覆盖 |
+| Night | REM reported by the app | Low 7 bits of `rem_sleep` | Deep sleep reported by the app | Low 7 bits of `deep_sleep` | Heart-rate coverage |
 | --- | --- | --- | --- | --- | --- |
-| 01-06 | **0 分钟** | **458/485 分钟非零** | 44 分钟 | 458/485 分钟非零 | 485/485 |
-| 01-07 | **87 分钟** | **396/396 全为 0** | 74 分钟 | 396/396 全为 0 | 0/396 |
+| 01-06 | **0 minutes** | **458/485 minutes non-zero** | 44 minutes | 458/485 minutes non-zero | 485/485 |
+| 01-07 | **87 minutes** | **396/396 all 0** | 74 minutes | 396/396 all 0 | 0/396 |
 
-App 报 0 时字节几乎分钟分钟非零，App 报 87 分钟时字节全零。**方向是反的**，这比"数值对不上"
-更彻底：不存在任何单调缩放能让这两列同时成立。
+When the app reports 0 the bytes are non-zero in almost every minute, and when the app reports 87
+minutes the bytes are all zero. **The direction is reversed**, which is even more decisive than "the
+numbers do not match": no monotonic scaling can make both columns hold at the same time.
 
-再看开关条件。全库 1920 分钟：
+Look at the switch condition again. Whole database, 1920 minutes:
 
-- `rem_sleep` 低 7 位非零的 **463 分钟，全部**当分钟有心率；
-- 有心率但字节为 0 的 755 分钟，全部落在白天非睡眠段（`kind` 为 80/96/1/16 等）。
+- The **463 minutes** where the low 7 bits of `rem_sleep` are non-zero **all** have heart rate in
+  that minute;
+- The 755 minutes with heart rate but 0 bytes all fall in daytime non-sleep segments (`kind` is
+  80/96/1/16 etc.).
 
-所以这两列的语义是：**"处于睡眠窗口且当分钟有心率时，手环算出的一个判别分数"**。它与 App
-显示的阶段分钟数没有对应关系，方向甚至相反。§5 里观察到的"深睡与心率负相关、REM 与心率
-正相关"是真的——只是那个判别不是 Zepp 展示的那套分期。
+So the semantics of these two columns are: **"a discriminant score computed by the band while it is
+in the sleep window and there is heart rate in that minute"**. It has no correspondence with the
+stage minutes shown by the app, and the direction is even reversed. The observation in §5 that
+"deep sleep negatively correlates with heart rate, REM positively correlates with heart rate" is
+true — it is just that the discriminant is not the staging that Zepp displays.
 
-### 8.4 现在只有一夜可用，样本该怎么补
+### 8.4 Only one night is usable now; how should samples be added
 
-| 夜 | 状态 | 能否用于校准 |
+| Night | Status | Usable for calibration |
 | --- | --- | --- |
-| 01-05 | 库里没有（同步前就丢了） | 否 |
-| 01-06 | 可用，但缺 21:06–22:06 一小时 | **是（唯一一夜）** |
-| 01-07 | 未佩戴（679 分钟 0xF3） | 否，但它是**负对照**——证明字节 ≠ 阶段 |
+| 01-05 | not in the database (lost before sync) | no |
+| 01-06 | usable, but missing the hour 21:06–22:06 | **yes (the only night)** |
+| 01-07 | not worn (679 minutes of 0xF3) | no, but it is a **negative control** — proving the bytes ≠ stages |
 
-一个夜晚能对齐任何读法，在这种样本量下调参数就是拿数据反推魔法值。因此新增了
-[`tools/calibrate_sleep.py`](../../tools/calibrate_sleep.py)：把四种读法（1/128 积分、
-Gadgetbridge 阈值、本项目启发式、逐阈值扫描）放在同一张表里，并在**可用夜 < 2 时拒绝给出
-拟合结论**，只列差值：
+One night can be aligned with any reading; tuning parameters at this sample size is just
+reverse-engineering magic values from the data. Therefore
+[`tools/calibrate_sleep.py`](../../tools/calibrate_sleep.py) was added: it puts four readings
+(1/128 integration, Gadgetbridge thresholds, this project's heuristic, per-threshold sweep) in the
+same table, and **refuses to give a fitting conclusion when usable nights < 2**, listing only the
+differences:
 
 ```
 $ ./.venv/Scripts/python.exe tools/calibrate_sleep.py
@@ -455,194 +530,236 @@ $ ./.venv/Scripts/python.exe tools/calibrate_sleep.py
 结论：只有 1 个可用夜晚。**不做拟合**……
 ```
 
-要补样本，每夜三步：**戴着睡 → 当天同步 → 当天把 Zepp 那页的数字记进
-`data/zepp_nights.json`**。第二步是硬前提：手环在收到 `03` ack 之后会清掉已上传的分钟数，
-01-05 就是这么丢的。记录格式：
+To add samples, three steps per night: **sleep with it on → sync that day → record that day's Zepp
+numbers into `data/zepp_nights.json`**. The second step is a hard prerequisite: after receiving the
+`03` ack the band clears the uploaded minutes; that is how 01-05 was lost. Record format:
 
 ```json
 {"date": "2020-01-06", "score": 73, "window": ["21:06", "06:06"],
  "asleep_min": 520, "deep_min": 44, "light_min": 476, "rem_min": 0, "awake_min": 20}
 ```
 
-凑到 3–5 夜后，工具会给出两个结论：哪种读法的深睡/REM 误差最小，以及**固定阈值在各夜是否
-一致**（一致才说明三字节真能当阶段用，不一致就只能当趋势）。
+After accumulating 3–5 nights, the tool will give two conclusions: which reading has the smallest
+deep-sleep/REM error, and **whether the fixed thresholds are consistent across nights** (consistency
+would show the three bytes can really be used as stages; inconsistency means they can only be used
+as trends).
 
-### 8.5 两个确认：一个已有答案，一个变成了更要紧的问题
+### 8.5 Two confirmations: one already answered, one became a more pressing question
 
-**第二问（01-07 那夜手环是否没戴）：已确认没戴。** 佩戴状态经独立核对，与 §6.2 的 PPG 判据一致。`0xF3` = 未佩戴 由此定论。
+**Second question (whether the band was not worn that night of 01-07): confirmed not worn.** Wear
+status was independently checked and is consistent with the PPG criterion in §6.2. `0xF3` = not
+worn is settled by this.
 
-**第一问（是不是绑了多台设备）：反而变得更关键。** 既然那一夜手环不在手腕上，Zepp 却给出了
-完整分期，那就说明 **App 的睡眠页不总是这块手环的数据**。这带来两个直接后果：
+**First question (whether multiple devices are bound): instead became more critical.** Since the
+band was not on the wrist that night yet Zepp gave complete staging, that shows **the app's sleep
+page is not always this band's data**. This has two direct consequences:
 
-1. **"Zepp 数字 = 这块手环的基准"这个前提必须逐夜验证。** 用错来源的夜晚做校准，比不校准
-   更糟——它会把别的设备的算法结论搬进本项目的分期模型。`tools/calibrate_sleep.py` 因此加了
-   两道闸：手环未佩戴的夜晚直接标注"这一页来自别的设备"并排除，`device` 字段为空的夜晚
-   打上"来源设备未记录"的警告。
-2. ~~01-06 那一夜也值得怀疑~~ —— **这条怀疑已被六夜数据排除**。深睡分钟在六夜里是
-   62 / 58 / 68 / 44 / 44 / 74，占睡眠 8%–19%，既不是常数也不是固定比例。两次 44 是巧合，
-   不是"按 ~8.5% 切"（§8.6）。
+1. **The premise "Zepp numbers = this band's baseline" must be verified night by night.** Calibrating
+   with nights of the wrong source is worse than not calibrating — it would import another device's
+   algorithm conclusions into this project's staging model. `tools/calibrate_sleep.py` therefore
+   adds two gates: nights when the band was not worn are directly marked "this page comes from
+   another device" and excluded, and nights with an empty `device` field are flagged with the
+   warning "source device not recorded".
+2. ~~The night of 01-06 is also worth doubting~~ — **this doubt has been ruled out by six nights of
+   data.** Deep-sleep minutes across six nights are 62 / 58 / 68 / 44 / 44 / 74, i.e. 8%–19% of
+   sleep, neither a constant nor a fixed ratio. The two 44s are a coincidence, not "cut at ~8.5%"
+   (§8.6).
 
-所以下一步不是再去比数字，而是**先确定来源**：打开 Zepp Life 的睡眠详情页（或"我的设备"），
-看那一夜的记录归在哪台设备名下。只有来源确认是 Mi Band 6 的夜晚，才有资格进
-`data/zepp_nights.json` 的 `device` 字段，也才谈得上校准三个字节。
+So the next step is not to compare numbers again, but to **determine the source first**: open Zepp
+Life's sleep details page (or "My Devices") and see which device that night's record is under. Only
+when the source is confirmed to be Mi Band 6 does a night qualify for the `device` field of
+`data/zepp_nights.json`, and only then can calibrating the three bytes be discussed.
 
-### 8.6 六夜并排（16:14 补到 01-01 / 01-02 / 01-03）
+### 8.6 Six nights side by side (01-01 / 01-02 / 01-03 added at 16:14)
 
-用户又补了三页，六夜的完整数字如下（每行都自洽：深睡 + 浅睡 + REM = 睡眠，睡眠 + 清醒 = 卧床）：
+The user added three more pages, and the complete numbers for six nights are as follows (each row is
+self-consistent: deep + light + REM = sleep, sleep + awake = in bed):
 
-| 日期 | 得分 | 卧床 | 睡眠 | 深睡 | 浅睡 | REM | 清醒 | 手环有没有那一夜 |
+| Date | Score | In bed | Sleep | Deep sleep | Light sleep | REM | Awake | Did the band have that night |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01-01 | 75（胜 38%） | 23:06 → 07:36（8h30） | 7h57（477） | 1h02（62，13%） | 6h55（415，87%） | — | 33 | 没有 |
-| 01-02 | 86（胜 71%） | 22:07 → 06:35（8h28） | 8h27（507） | 58（11%） | 7h29（449，89%） | — | 1 | 没有 |
-| 01-03 | 88（胜 78%） | 21:45 → 06:34（8h49） | 8h40（520） | 1h08（68，13%） | 7h32（452，87%） | — | 9 | 没有 |
-| 01-05 | 75（胜 38%） | 21:16 → 05:42（8h26） | 8h05（485） | 44（9%） | 7h21（441，91%） | — | 21 | 没有 |
-| 01-06 | 73（胜 34%） | 21:06 → 06:06（9h00） | 8h40（520） | 44（8%） | 7h56（476，92%） | — | 20 | **有**（缺 21:06–22:06） |
-| 01-07 | 92（胜 90%） | 22:44 → 05:11（6h27） | 6h27（387） | 1h14（74，19%） | 3h46（226，58%） | **1h27（87，23%）** | 0 | 没有（未佩戴） |
+| 01-01 | 75 (better than 38%) | 23:06 → 07:36 (8h30) | 7h57 (477) | 1h02 (62, 13%) | 6h55 (415, 87%) | — | 33 | no |
+| 01-02 | 86 (better than 71%) | 22:07 → 06:35 (8h28) | 8h27 (507) | 58 (11%) | 7h29 (449, 89%) | — | 1 | no |
+| 01-03 | 88 (better than 78%) | 21:45 → 06:34 (8h49) | 8h40 (520) | 1h08 (68, 13%) | 7h32 (452, 87%) | — | 9 | no |
+| 01-05 | 75 (better than 38%) | 21:16 → 05:42 (8h26) | 8h05 (485) | 44 (9%) | 7h21 (441, 91%) | — | 21 | no |
+| 01-06 | 73 (better than 34%) | 21:06 → 06:06 (9h00) | 8h40 (520) | 44 (8%) | 7h56 (476, 92%) | — | 20 | **yes** (missing 21:06–22:06) |
+| 01-07 | 92 (better than 90%) | 22:44 → 05:11 (6h27) | 6h27 (387) | 1h14 (74, 19%) | 3h46 (226, 58%) | **1h27 (87, 23%)** | 0 | no (not worn) |
 
-这张表解决了三件事，也把一条教训彻底钉死。
+This table settles three things and nails one lesson down once and for all.
 
-**① REM 只出现在"不是手环"的那一夜。** 手环佩戴的五个夜晚全部没有 REM 栏。所以 §7 的观察
-（这块手环的夜晚没有 REM）本身是对的，我在 §8.1 的撤回才是错的。同一条教训一晚上踩了两次：
+**① REM appears only on the night that was "not the band".** All five nights when the band was worn
+have no REM row. So the observation in §7 (this band's nights have no REM) is itself correct, and my
+withdrawal in §8.1 was what was wrong. The same lesson was learned twice in one night:
 
-- §7：一页没有 REM → 断言"这款设备不支持 REM"（把一页当能力）；
-- §8.1：另一页有 REM → 断言"之前说错了"（把**另一台设备**的页面当成了这台设备的能力）。
+- §7: one page had no REM → asserted "this device does not support REM" (treating one page as
+  capability);
+- §8.1: another page had REM → asserted "what I said before was wrong" (treating **another
+  device's** page as this device's capability).
 
-正确的表述是：**n=5 的观察——这块手环的夜晚没有 REM**；REM 出现在另一台设备的夜里。
-§8.3 的倒挂也因此解释完整：`rem_sleep` 字节不是 REM 时长，App 对这块手环也根本不给 REM 一栏。
+The correct statement is: **the n=5 observation — this band's nights have no REM**; REM appears in
+another device's nights. The inversion in §8.3 is therefore fully explained: the `rem_sleep` byte
+is not REM duration, and the app does not give this band a REM row at all.
 
-**② "44 分钟是固定比例"的怀疑被排除。** 六夜的深睡是 **62 / 58 / 68 / 44 / 44 / 74** 分钟，
-占睡眠 **8%–19%**，既不是常数也不是固定百分比。两次 44 是巧合，我上一轮那个"按 ~8.5% 切"
-的假设不成立。
+**② The doubt that "44 minutes is a fixed ratio" is ruled out.** Deep sleep across six nights is
+**62 / 58 / 68 / 44 / 44 / 74** minutes, i.e. **8%–19%** of sleep, neither a constant nor a fixed
+percentage. The two 44s are a coincidence; my earlier hypothesis of "cut at ~8.5%" does not hold.
 
-**③ 得分主要惩罚觉醒，不是奖励时长。** 按清醒分钟排序：
+**③ The score mainly penalizes awakenings, not rewards duration.** Sorted by awake minutes:
 
-| 日期 | 01-07 | 01-02 | 01-03 | 01-06 | 01-05 | 01-01 |
+| Date | 01-07 | 01-02 | 01-03 | 01-06 | 01-05 | 01-01 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 清醒（分钟） | 0 | 1 | 9 | 20 | 21 | 33 |
-| 得分 | 92 | 86 | 88 | 73 | 75 | 75 |
+| Awake (minutes) | 0 | 1 | 9 | 20 | 21 | 33 |
+| Score | 92 | 86 | 88 | 73 | 75 | 75 |
 
-相关系数：得分 vs 清醒 **-0.87**、vs 睡眠效率 **+0.86**、vs 深睡占比 +0.78、vs 睡眠时长
-**-0.47**（负的——得分最高那夜只睡了 6h27m）。清醒 ≤9 分钟的三夜是 86/88/92，≥20 分钟的
-三夜是 73/75/75，两组完全分开。
+Correlation coefficients: score vs awake **-0.87**, vs sleep efficiency **+0.86**, vs deep-sleep
+ratio +0.78, vs sleep duration **-0.47** (negative — the night with the highest score slept only
+6h27m). The three nights with awake ≤9 minutes are 86/88/92, and the three with ≥20 minutes are
+73/75/75; the two groups are completely separated.
 
-这条对项目有用：本项目报的 `efficiency` 和 `awakenings` 与 Zepp 的分数是同一族信号
-（01-06：我们 17 分钟清醒、效率 96%；Zepp 20 分钟、73 分）。但它也提醒一件事——**分数不能
-拿来当校验基准**，它对觉醒的权重远大于深睡，而我们能可靠测的恰好是睡眠时长与觉醒。
+This is useful for the project: the `efficiency` and `awakenings` reported by this project are the
+same family of signals as Zepp's score (01-06: ours 17 minutes awake, efficiency 96%; Zepp 20
+minutes, score 73). But it also reminds us of one thing — **the score cannot be used as a
+verification baseline**; its weight on awakenings is far greater than on deep sleep, and what we can
+reliably measure is exactly sleep duration and awakenings.
 
-**④ 顺带得到一个可用的先验。** 手环五夜的深睡占睡眠 8%–13%（中位 11%）。本项目 01-06 报
-11%（50 / 453），落在这个区间内。**所以不需要为了让某个数字对上而去拧阈值**——这正是前几轮
-最容易犯的错。
+**④ A usable prior is obtained along the way.** Across five band nights, deep sleep is 8%–13% of
+sleep (median 11%). This project reports 11% for 01-06 (50 / 453), which falls inside that range.
+**So there is no need to twist thresholds just to make some number match** — this is exactly the
+mistake most easily made in the previous rounds.
 
-六夜只换来一个先验，没有换来第二个校准夜：01-01/02/03/05 都早于手环活动历史的起点
-（01-06 22:06）。这是下一轮唯一要解决的事——**每早同步一次，夜就攒得下来**。
+Six nights bought only one prior, not a second calibration night: 01-01/02/03/05 are all earlier
+than the start of the band's activity history (01-06 22:06). That is the only thing to solve in the
+next round — **sync once every morning, and nights will accumulate**.
 
-## 9. 为什么 Zepp 有、手环没有：三层链路
+## 9. Why Zepp has it and the band does not: a three-layer chain
 
-这个问题出现了三次（01-01/02/03/05 的分钟数据、深睡/REM 这类分期、01-07 整夜），但
-**三次的原因完全不同**。它们能混在一起，是因为"Zepp 上的数据"其实来自三个不同的层：
+This question appeared three times (the minute data of 01-01/02/03/05, staging such as deep
+sleep/REM, and the whole night of 01-07), but **the reasons are completely different each time**.
+They can be confused because "the data on Zepp" actually comes from three different layers:
 
 ```
-手环（分钟级环形缓冲）
-   ↓  BLE fetch（0x01 / 0x25 …）
-手机上的 Zepp（本地库，同时上传云端）
+Band (minute-level ring buffer)
+   ↓  BLE fetch (0x01 / 0x25 …)
+Zepp on the phone (local database, also uploaded to the cloud)
    ↓
-云端（算分期、算得分、合并同一账号下的多台设备）
+Cloud (computes staging, computes the score, merges multiple devices under the same account)
 ```
 
-**本项目只跟第一层说话。** App 看到的是第二、三层，所以"Zepp 有"从来不等于"手环里有、我们没取到"。
+**This project talks only to the first layer.** The app sees the second and third layers, so "Zepp
+has it" never equals "the band has it and we failed to fetch it".
 
-### 9.1 三种情形，一眼区分
+### 9.1 Three situations, distinguished at a glance
 
-| 情形 | 例证 | 东西原本在哪 | 我们能不能拿到 |
+| Situation | Example | Where the thing originally was | Can we get it |
 | --- | --- | --- | --- |
-| ① 手环有，但已被 App 取走 | 01-01/02/03/05 的分钟数据 | 手机本地库 + 云端 | **不能**——那天没同步就没了 |
-| ② 手环从来没算过 | 深睡 / 浅睡 / REM / 睡眠得分 / 睡眠呼吸质量 | 从来不存在于手环 | 不能，也不必：原始数据在我们手里 |
-| ③ 手环没戴 | 01-07 | 同一账号下的另一台设备 | 不能（本来也不是它的数据） |
+| ① The band has it, but the app already took it | the minute data of 01-01/02/03/05 | phone local database + cloud | **No** — it is gone if not synced that day |
+| ② The band never computed it | deep sleep / light sleep / REM / sleep score / sleep breathing quality | never existed on the band | no, and no need: the raw data is in our hands |
+| ③ The band was not worn | 01-07 | another device under the same account | no (it was not its data to begin with) |
 
-### 9.2 ① 手环只是缓冲，App 取完就回收
+### 9.2 ① The band is only a buffer; the app reclaims it after fetching
 
-协议的最后一步是 `0x03`，Gadgetbridge 里叫 `COMMAND_ACK_ACTIVITY_DATA`——相当于"我收到了"
-的收据；之后是否回收由固件决定（这一步看不到源码，但现象吻合）。
+The last step of the protocol is `0x03`, called `COMMAND_ACK_ACTIVITY_DATA` in Gadgetbridge — the
+equivalent of an "I received it" receipt; whether it is reclaimed afterwards is decided by the
+firmware (the source is not visible for this step, but the behavior matches).
 
-实测：按 7 天发起请求，手环的分钟数据**只到最近 40 小时以内**（01-08 14:05 那次是 01-06
-22:06，01-08 16:25 那次是 01-07 00:25），而 App 上 01-01 起的记录都在。窗口的大小和平移
-速率在 §10 里量化了。
+Measured: when requesting 7 days, the band's minute data **only goes back to within the last 40
+hours** (the 01-08 14:05 fetch was 01-06 22:06; the 01-08 16:25 fetch was 01-07 00:25), while on the
+app records from 01-01 onward are all present. The window size and shift rate are quantified in
+§10.
 
-> 顺带一个容易踩的坑：**别拿"声明条数"减"落盘条数"**。回复里的数字（例如 2011）是**本次
-> fetch 声明**的条数，而库里是**去重后**的行数（1920）。两者口径不同，差 91 不能推出"少取了
-> 91 分钟"。判断有没有漏，只看时间范围是否连续覆盖。
+> An easy pitfall along the way: **do not subtract "stored rows" from "declared count"**. The number
+> in the reply (e.g. 2011) is the count **declared by this fetch**, while the database holds
+> **de-duplicated** rows (1920). The two measures differ; a difference of 91 does not imply "91
+> minutes were missed". To judge whether anything was missed, only look at whether the time range is
+> covered continuously.
 
-### 9.3 ② 手环不产分期，App 是现场算的
+### 9.3 ② The band does not produce staging; the app computes it on the fly
 
-手环上传的是 `kind` / `intensity` / `steps` / `heart_rate` 加三个分数，**没有**"深睡 44 分钟"
-这种东西。证据是 §6.4：`0x48 SLEEP_SESSION` 在这台固件上声明 0 条——如果手环自己算分期并
-保存，它总得存在某个可读的地方。
+What the band uploads is `kind` / `intensity` / `steps` / `heart_rate` plus three scores, **not**
+things like "deep sleep 44 minutes". The evidence is §6.4: `0x48 SLEEP_SESSION` declares 0 records on
+this firmware — if the band computed and stored staging itself, it would have to exist somewhere
+readable.
 
-所以 Zepp 那一屏深睡/浅睡，是 App（或云端）拿到同一批原始数据后现算的。这有两层含义：
+So Zepp's screen of deep/light sleep is computed on the fly by the app (or cloud) after receiving
+the same batch of raw data. This has two implications:
 
-- 它不是"我们没取到"，而是"从来没有以分钟形式存在过"；
-- 但它**证明了这件事可行**：同一批 `kind` + 心率，App 能算出分期，我们也能——差别只在算法，
-  不在数据通道。这也正是本项目 `sleep_analysis.py` 的立足点。
+- It is not "we failed to fetch it", but "it never existed in minute form";
+- But it **proves this is feasible**: with the same batch of `kind` + heart rate, the app can compute
+  staging, and so can we — the difference is only the algorithm, not the data channel. This is also
+  the footing of this project's `sleep_analysis.py`.
 
-### 9.4 ③ 账号里的数据不一定是这台设备的
+### 9.4 ③ Data in the account is not necessarily this device's
 
-01-07：手环 679 分钟全是 `0xF3`（未佩戴）、0 条心率，App 却有 6h27 的完整分期（§8.2）。
-所以"Zepp 有"甚至连"有设备记录过"都不能保证——它可能来自同一账号下的另一台设备。
+01-07: the band's 679 minutes are all `0xF3` (not worn), 0 heart-rate readings, yet the app has
+complete staging of 6h27 (§8.2). So "Zepp has it" cannot even guarantee "some device recorded it" —
+it may come from another device under the same account.
 
-### 9.5 判断顺序（三步就够）
+### 9.5 Decision order (three steps are enough)
 
-1. `kind` 是不是 `0xF3`（未佩戴）→ 情形 ③；
-2. 时间戳是否早于手环现有范围（只留最近 40 小时，见 §10）→ 情形 ①；
-3. 时间在范围内、数据也有，但字段是 App 独有的（分期/得分/呼吸质量）→ 情形 ②。
+1. Is `kind` equal to `0xF3` (not worn)? → situation ③;
+2. Is the timestamp earlier than the band's current range (only the last 40 hours are kept, see
+   §10)? → situation ①;
+3. Is the time within range and the data present, but the fields app-only (staging/score/breathing
+   quality)? → situation ②.
 
-对照之后，只有 ① 是"可惜但可救"的：**当天同步一次，夜就留住了**。② 和 ③ 无论同步多少次
-都不会出现，因为它们本来就不在手环里。
+After this comparison, only ① is "regrettable but salvageable": **sync once that day and the night
+is kept**. ② and ③ will never appear no matter how many times you sync, because they were never in
+the band to begin with.
 
 ---
 
-## 10. 手环到底留多久：40 小时窗口的实测（2020-01-08 16:25）
+## 10. How long does the band actually keep data: measurement of the 40-hour window (2020-01-08 16:25)
 
-§9 说"手环只是缓冲"，但当时只有一句定性描述。这一节把它量出来：再抓一次、探一次"声明
-窗口"、再把两次的重叠部分逐字节比一遍。
+§9 said "the band is only a buffer", but at the time that was only a qualitative description. This
+section quantifies it: fetch once more, probe the "declared window" once, then compare the
+overlapping part of the two fetches byte by byte.
 
-省流结论：**手环的分钟数据是一块 2400 分钟（整 40 小时）的滑动窗口，前端以每分钟一行的
-速率被挤掉，且 App 取走的那几段会留下永久空洞。`--sync-history 7` 永远给不了你 7 天。**
+TL;DR: **the band's minute data is a sliding window of 2400 minutes (exactly 40 hours); the front end
+is evicted at a rate of one row per minute, and the segments the app has taken leave permanent
+holes. `--sync-history 7` will never give you 7 days.**
 
-### 10.1 两次抓取：窗口整块向前平移了 139 分钟
+### 10.1 Two fetches: the window shifted forward as a block by 139 minutes
 
-| 抓取时刻 | 数据范围（本地时） | 行数 | 跨度 |
+| Fetch time | Data range (local time) | Rows | Span |
 | --- | --- | --- | --- |
-| 01-08 14:05 | 01-06 22:06 → 01-08 14:05 | 1920 | **2399 分钟** |
-| 01-08 16:25 | 01-07 00:25 → 01-08 16:24 | 1920 | **2399 分钟** |
+| 01-08 14:05 | 01-06 22:06 → 01-08 14:05 | 1920 | **2399 minutes** |
+| 01-08 16:25 | 01-07 00:25 → 01-08 16:24 | 1920 | **2399 minutes** |
 
-两次相隔 140 分钟，起点正好前移 139 分钟——**1:1**。也就是说每写入一分钟的新数据，就有一
-分钟最老的数据被挤出去；不是"到期删除"，是"被覆盖"。
+The two fetches are 140 minutes apart, and the start moved forward by exactly 139 minutes — **1:1**.
+That is, for every minute of new data written, one minute of the oldest data is pushed out; it is
+not "deleted on expiry" but "overwritten".
 
-跨两次都精确等于 2399 分钟（2400 个分钟位），这不是巧合：**窗口宽度 = 2400 分钟 = 40 小时。**
+The span is exactly 2399 minutes both times (2400 minute slots); this is no coincidence: **window
+width = 2400 minutes = 40 hours.**
 
-直接后果：01-06 那一夜在 16:25 的窗口之外了，从这一刻起**无论再同步多少次都取不回来**。
-想留住某一夜，只有一条路——那一夜结束后 40 小时内同步一次（稳妥点就每天同步）。
+Direct consequence: the night of 01-06 is outside the 16:25 window, and from this moment on **no
+matter how many more times you sync, it cannot be recovered**. To keep a night, there is only one
+path — sync once within 40 hours after that night ends (once a day is safer).
 
-### 10.2 1920 行 vs 2400 分钟：中间那 481 分钟的洞
+### 10.2 1920 rows vs 2400 minutes: the 481-minute hole in between
 
-两次抓取都有同一个洞：**01-07 07:22 → 01-07 15:23，481 分钟**。2400 − 481 = 1919，加回
-一个端点就是 1920。
+Both fetches have the same hole: **01-07 07:22 → 01-07 15:23, 481 minutes**. 2400 − 481 = 1919, plus
+one endpoint back gives 1920.
 
-关键在"洞的位置两次完全没动"。如果是"窗口滑动留下的空白"，它会跟着窗口一起走；它没动，
-说明**这些行是被删掉的**，不是没被记录——那正是手机白天在身上时自动同步、取走并回执的
-那一段（8 小时，恰好是一个工作日）。
+The key is that "the hole's position did not move between the two fetches". If it were "a blank left
+by the sliding window", it would move together with the window; it did not move, which means **these
+rows were deleted**, not that they were never recorded — that is exactly the segment the phone
+automatically synced, took and acknowledged while it was carried during the day (8 hours, exactly
+one working day).
 
-所以：
+So:
 
-- `1920` **不是**手环的容量上限，而是"40 小时窗口 − 已被 App 咬走的 8 小时"；
-- 之前"声明 2011 / 落盘 1920"的 91 分钟差，也是同一类口径问题，不是漏取；
-- 反过来说，如果某段时间 App 一直没同步，你能一次拿到接近 2400 行。
+- `1920` is **not** the band's capacity limit, but "40-hour window − the 8 hours already bitten off
+  by the app";
+- The earlier 91-minute difference between "declared 2011 / stored 1920" is the same kind of
+  measurement issue, not missed fetching;
+- Conversely, if the app has not synced for a while, you can get close to 2400 rows in one go.
 
-### 10.3 只问不取的探针：`tools/probe_declared.py`
+### 10.3 An ask-only probe: `tools/probe_declared.py`
 
-想确认"窗口有多大"，不能靠抓——抓一次就回执一次，会改变手环的状态。所以加了一个探针：
-只发 `01 01 <6B 时间><reason><tz>`（问一句"从这一刻起你还有多少"），**不取数据、不发
-`0x03`**，问完就断开。
+To confirm "how big the window is", you cannot rely on fetching — each fetch sends a receipt and
+changes the band's state. So a probe was added: it only sends `01 01 <6B time><reason><tz>` (asking
+"how much do you have left from this moment"), **fetches no data and sends no `0x03`**, and
+disconnects after asking.
 
 ```
 $ .venv/Scripts/python.exe tools/probe_declared.py 168 24
@@ -651,28 +768,35 @@ $ .venv/Scripts/python.exe tools/probe_declared.py 168 24
 2020-01-07T16:32+08:00       1437        2020-01-07T16:32  since+1437min -> 2020-01-08T16:29+08:00
 ```
 
-两行读数各自说明一件事：
+Each of the two lines of readings explains one thing:
 
-- 问 **7 天前**，手环答 **2406 分钟**（40.1 小时），不是 7×1440=10080。它把问题裁到自己的
-  窗口里答，**再问得早也没用**；
-- 问 **24 小时前**，手环答 **1437**，约等于"到现在"——这一整天都在窗口内，一条不缺。
+- Ask **7 days ago**, the band answers **2406 minutes** (40.1 hours), not 7×1440=10080. It trims the
+  question to its own window when answering, **asking earlier is useless**;
+- Ask **24 hours ago**, the band answers **1437**, roughly equal to "until now" — the whole day is
+  within the window, not a single minute missing.
 
-（`first sample` 一列手环是把请求时刻原样回显的，不代表语料真正的起点，所以别拿它当锚点。
-计数本身也有几分钟的量化误差：16:27 那次读 2411，16:32 那次读 2406。窗口宽度取 40 小时，
-以两次抓取的 2399 分钟跨度为硬证据。固件一次连接只受理一次这样的问句，第二次答 `0x02`，
-探针因此每次重连。）
+(The `first sample` column: the band echoes the request time verbatim; it does not represent the
+real start of the corpus, so do not use it as an anchor. The count itself also has a quantization
+error of a few minutes: the 16:27 reading was 2411, the 16:32 reading was 2406. The window width is
+taken as 40 hours, with the 2399-minute span of the two fetches as hard evidence. The firmware
+accepts only one such query per connection and answers `0x02` the second time, so the probe reconnects
+each time.)
 
-### 10.4 重叠部分逐字节一致
+### 10.4 The overlapping part is byte-for-byte identical
 
-两次抓取重叠 1781 分钟，把 8 个字节逐一对比：**0 处不一致**。
+The two fetches overlap by 1781 minutes; comparing the 8 bytes one by one: **0 mismatches**.
 
-这件事有两个用处：一是解析是确定的，同一分钟重取不漂；二是可以放心地"多抓几次然后合并"
-——重复抓取不会污染库，只会补齐窗口还没覆盖到的部分。
+This has two uses: first, parsing is deterministic and re-fetching the same minute does not drift;
+second, it is safe to "fetch several times and merge" — repeated fetching will not pollute the
+database, it only fills in the parts not yet covered by the window.
 
-### 10.5 对使用方式的三条硬约束
+### 10.5 Three hard constraints on usage
 
-1. **同步节奏决定数据存亡。** 每天同步一次是最低要求；隔两天再来，第一夜已经在窗口外。
-2. **`--sync-history N` 里的 N 只是"我最多问多久"，不是"我会拿到多久"。** 实际到手永远
-   ≤ 40 小时，且可能被 App 咬出几个洞。
-3. **空洞 ≠ 丢数据。** 洞是 App 先取走了；那一段在手机本地库里，只是本项目拿不到。判断
-   "是不是我们漏了"，只看范围是否连续、`kind` 是否为 `0xF3`，别拿声明条数做减法。
+1. **Sync cadence decides whether data survives.** Syncing once a day is the minimum; come back two
+   days later and the first night is already outside the window.
+2. **The N in `--sync-history N` only means "how far back I ask at most", not "how far back I will
+   get".** What actually arrives is always ≤ 40 hours, and the app may have bitten a few holes in
+   it.
+3. **A hole ≠ lost data.** The hole is the app having taken it first; that segment is in the phone's
+   local database, only this project cannot reach it. To judge "did we miss it", only look at
+   whether the range is continuous and whether `kind` is `0xF3`; do not subtract declared counts.

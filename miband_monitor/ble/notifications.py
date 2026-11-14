@@ -11,6 +11,7 @@ are not part of the IMU data path.
 from __future__ import annotations
 
 import logging
+import time
 
 from .parsers import parse_heart_rate, parse_raw_sensor_data, parse_realtime_steps
 
@@ -24,6 +25,8 @@ class NotificationMixin:
         """Handle one standard Heart Rate Measurement notification."""
         try:
             bpm = parse_heart_rate(data)
+            self._last_hr_notify_at = time.monotonic()
+            self._hr_soft_rearm_count = 0
             logger.info("[HR] Current Heart Rate: %d BPM", bpm)
             if self._hr_callback:
                 self._hr_callback(bpm)

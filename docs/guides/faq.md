@@ -1,75 +1,77 @@
-# 常见问题（FAQ）
+**English** · [简体中文](faq.zh-CN.md)
 
-按现象查表；平台细节见 [cross-platform.md](cross-platform.md)，配置见 [configuration.md](configuration.md)。
+# Frequently Asked Questions (FAQ)
 
-## 连接与扫描
+Look up by symptom; see [cross-platform.md](cross-platform.md) for platform details and [configuration.md](configuration.md) for configuration.
 
-| 现象 | 原因/处理 |
+## Connection and scanning
+
+| Symptom | Cause / handling |
 |---|---|
-| `No Bluetooth adapters found` / `org.bluez was not provided` | 本机无蓝牙栈（如 WSL2 未直通、`bluetooth` 服务未启动）。安装/启动 BlueZ，或直通 USB 适配器。 |
-| 90 秒内扫描不到手环 | 手机关蓝牙；用 Zepp Life 连一次手环恢复"公共广播"易失状态；确认 MAC/UUID；手环每 40–60 秒才发一个脉冲，`--scan-timeout 120`。 |
-| 扫描器在跑、硬件计数在涨，但 25 秒内**连别的 BLE 设备都没有一个包** | USB 适配器射频假死（常见于 BARROT `33fa:0012`）：`sudo usbreset <vid:pid>` 或拔插 USB 后 `sudo systemctl restart bluetooth`。D-Bus 电源循环实测无效。见 [validation/linux-ble-connect-findings.md](../validation/linux-ble-connect-findings.md)。 |
-| Linux 建链后 9–10 秒被断，`failed to discover services, device disconnected` | 手环未认证连接看门狗（首次要枚举 ~150 个 GATT 句柄）。客户端自动重试；先 `bluetoothctl trust <MAC>`。 |
-| 连上 40 秒左右就断，`UnknownObject ... doesn't exist` | 未 trust：BlueZ 在断链后移除设备对象。`bluetoothctl trust <MAC>`，必要时配对。 |
-| 连接时 BlueZ 日志 `No agent available for request type 2` | 手环发起 SMP 而系统无 agent：`MIBAND_BLUEZ_AGENT=1` 或手工 `bluetoothctl pair`。 |
-| Linux 每次连上约 **5 秒**就掉线，`ServicesResolved=False`（`RX/TX acl=0`） | BlueZ 保存了陈旧 `LTK` 导致空口 `LE Start Encryption` 超时（`0x08`）。连续命中 2 次时客户端会自动清缓存并拉起 agent 重建配对；也可手动 `bluetoothctl remove <MAC>` + `MIBAND_BLUEZ_AGENT=1` 重配。注意正常使用 Zepp Life 同步后无需清缓存。见 [validation/linux-ble-test-report.md](../validation/linux-ble-test-report.md)。 |
-| 日志显示 `already connected in BlueZ; reusing connection` 后不久掉线 | 上一次会话留下的半温/残留 `Connected=True` 状态。复用失败时客户端会自动 `disconnect_device()` 清零后重建；也可先运行 `bluetoothctl disconnect <MAC>` 再连接。 |
-| 每次都要等几十秒才连上 | 正常：无手机链路的手环每 40–60 秒才发一个脉冲。trust 后 BlueZ 缓存 GATT 表并自动回连。 |
-| Windows：`BleakError ... not found` / 连接被拒绝 | "设置 → 蓝牙和其他设备"确认适配器；删除设备旧记录；关手机蓝牙；用 `scan_ble.py` 核对地址。 |
-| Windows：`OSError: [WinError 193]` / 加载 `libecdh.so` 失败 | 当前版本会自动回退纯 Python；确认启动日志 `ECDH backend: python`。 |
-| macOS：扫描不到 / 地址对不上 | 不暴露 MAC：用 `scan_ble.py` 输出的 UUID 填 `DEVICE_ID`，或配置 `DEVICE_NAME`；系统设置允许终端访问蓝牙。 |
+| `No Bluetooth adapters found` / `org.bluez was not provided` | No Bluetooth stack on the machine (e.g. WSL2 without passthrough, `bluetooth` service not started). Install/start BlueZ, or pass through a USB adapter. |
+| Cannot find the band within 90 seconds | Turn off phone Bluetooth; connect once with Zepp Life to restore the band's volatile "public advertising" state; confirm the MAC/UUID; the band only emits a pulse every 40–60 seconds, so use `--scan-timeout 120`. |
+| Scanner is running and hardware counters increase, but within 25 seconds **not a single packet arrives even from other BLE devices** | USB adapter radio hang (common with BARROT `33fa:0012`): `sudo usbreset <vid:pid>` or unplug/replug USB, then `sudo systemctl restart bluetooth`. D-Bus power cycling has been measured to have no effect. See [validation/linux-ble-connect-findings.md](../validation/linux-ble-connect-findings.md). |
+| Linux: dropped 9–10 seconds after the link is established, with `failed to discover services, device disconnected` | The band's unauthenticated connection watchdog (the first connection must enumerate ~150 GATT handles). The client retries automatically; first run `bluetoothctl trust <MAC>`. |
+| Dropped after about 40 seconds, with `UnknownObject ... doesn't exist` | Not trusted: BlueZ removes the device object after disconnect. Run `bluetoothctl trust <MAC>`, and pair if necessary. |
+| BlueZ log shows `No agent available for request type 2` while connecting | The band initiated SMP but the system has no agent: set `MIBAND_BLUEZ_AGENT=1` or run `bluetoothctl pair` manually. |
+| Linux: drops about **5 seconds** after every connection, `ServicesResolved=False` (`RX/TX acl=0`) | BlueZ stores a stale `LTK`, causing an over-the-air `LE Start Encryption` timeout (`0x08`). When it happens twice in a row, the client automatically clears the cache and starts the agent to re-establish pairing; you can also manually `bluetoothctl remove <MAC>` + `MIBAND_BLUEZ_AGENT=1`. Note that after a normal Zepp Life sync there is no need to clear the cache. See [validation/linux-ble-test-report.md](../validation/linux-ble-test-report.md). |
+| After the log shows `already connected in BlueZ; reusing connection`, the link drops shortly afterwards | A half-warm/stale `Connected=True` state left by the previous session. If reuse fails, the client automatically calls `disconnect_device()` to reset and rebuild; you can also run `bluetoothctl disconnect <MAC>` first and then connect. |
+| Every connection takes tens of seconds | Normal: a band with no phone link only emits a pulse every 40–60 seconds. After trusting once, BlueZ caches the GATT table and reconnects automatically. |
+| Windows: `BleakError ... not found` / connection refused | Use "Settings → Bluetooth & other devices" to confirm the adapter; delete the old device record; turn off phone Bluetooth; verify the address with `scan_ble.py`. |
+| Windows: `OSError: [WinError 193]` / failing to load `libecdh.so` | The current version falls back to pure Python automatically; confirm the startup log says `ECDH backend: python`. |
+| macOS: cannot scan / address does not match | No MAC is exposed: use the UUID printed by `scan_ble.py` as `DEVICE_ID`, or configure `DEVICE_NAME`; allow the terminal to access Bluetooth in System Settings. |
 
-## 认证与数据流
+## Authentication and data streams
 
-| 现象 | 原因/处理 |
+| Symptom | Cause / handling |
 |---|---|
-| 认证超时 | 分块通知丢失或固件差异；`--log-level DEBUG` 查看；客户端下次会话自动重试。 |
-| 认证成功但心率不动 | 手环需佩戴贴合；`0x2A39` 控制序列可能被固件拒绝；重连或重启手环。 |
-| IMU 无数据 | 部分固件需先进入特定运动模式；`--imu` 为实验性功能。 |
-| 数据重复（步数） | 步数流先读一次当前值再订阅通知，首条可能重复，属预期。 |
-| 时间戳含义 | 实时流为电脑接收时间；历史同步为手环采样时间（见 [data-formats.md](data-formats.md)）。 |
+| Authentication timeout | Chunked notifications lost or firmware differences; check with `--log-level DEBUG`; the client retries on the next session automatically. |
+| Authentication succeeds but heart rate does not move | The band must be worn snugly; the `0x2A39` control sequence may be rejected by the firmware; reconnect or reboot the band. |
+| No IMU data | Some firmware requires entering a specific workout mode first; `--imu` is an experimental feature. |
+| Duplicate data (steps) | The step stream first reads the current value and then subscribes to notifications, so the first entry may be duplicated; this is expected. |
+| Meaning of timestamps | Live streams use computer receive time; history sync uses band sample time (see [data-formats.md](data-formats.md)). |
 
-## 历史同步
+## History sync
 
-| 现象 | 原因/处理 |
+| Symptom | Cause / handling |
 |---|---|
-| `--sync-history` 报 `band rejected fetch type` | 该固件/型号不支持对应历史类型；失败不影响实时采集。 |
-| `--sync-history` 超时/校验失败 | 分片丢失或固件差异；重连会重试；真机请附 DEBUG 日志。 |
-| `--sync-history 7` 却只拿到 40 小时 | 正常。参数只是"我最多问多久"，手环环形缓冲约 2400 分钟；起点按 1:1 前移。 |
-| Zepp 上有数据，手环里取不到 | 三种原因：① 已被 App 取走（40 小时外有永久空洞或超窗）；② 手环从不产这类数据（深睡/REM/得分是 App 现算）；③ 那一夜未佩戴（`0xF3`），App 显示的是同账号另一台设备。见 [investigations/sleep-fields.md](../investigations/sleep-fields.md)。 |
-| 想确认手环还留着多早的数据 | `python tools/probe_declared.py 168 24`：只问不取、不发 ACK，不扰动缓冲。 |
-| 0x26 睡眠血氧导入后没看到 | 确认写入独立 `spo2_sleep` 表；离线看板会优先读表、表空回退 JSONL。 |
+| `--sync-history` reports `band rejected fetch type` | That firmware/model does not support the corresponding history type; the failure does not affect live collection. |
+| `--sync-history` times out / checksum fails | Chunks lost or firmware differences; reconnection retries; on a real device please attach DEBUG logs. |
+| `--sync-history 7` only retrieves 40 hours | Normal. The parameter only means "I ask for at most this long"; the band's ring buffer holds about 2400 minutes; the start point moves forward 1:1. |
+| Zepp has data, but the band returns none | Three reasons: (1) already consumed by the app (permanent holes or out-of-window outside 40 hours); (2) the band never produces this kind of data (deep sleep/REM/score are computed by the app); (3) the band was not worn that night (`0xF3`), and the app showed another device on the same account. See [investigations/sleep-fields.md](../investigations/sleep-fields.md). |
+| Want to confirm how far back the band still has data | `python tools/probe_declared.py 168 24`: query only, no fetch, no ACK, does not disturb the buffer. |
+| 0x26 sleep SpO2 imported but not visible | Confirm it was written to the separate `spo2_sleep` table; the offline dashboard prefers the table and falls back to JSONL when it is empty. |
 
-## 看板与报告
+## Dashboard and reports
 
-| 现象 | 原因/处理 |
+| Symptom | Cause / handling |
 |---|---|
-| 看板打不开 / 端口占用 | `--web-port 0` 用随机端口；默认仅本机，远程需 `--web-host 0.0.0.0` 并注意防火墙。 |
-| 看板有数据但曲线不动 | SSE 断线会自动重连；确认页面未休眠或刷新页面重新拉 snapshot。 |
-| 看板刷新后历史为空 | 需要 `--storage sqlite/both` 且库中有数据；`source=db` 在缺库/缺表时静默降级。 |
-| `history_report.py` 报数据库不存在 | 先生成数据：`miband_client.py 60` 或 `--demo`。 |
-| 睡眠报告某夜显示 `unknown` | 该夜无心率：只能给睡眠时长，不能猜分期。 |
-| 整夜未佩戴却被算成睡眠 | 当前版本用 `kind & 0x0F == 3` 判定未佩戴，不生成睡眠段；若仍异常请附数据。 |
+| Dashboard will not open / port already in use | Use `--web-port 0` for a random port; it binds locally by default, so remote access needs `--web-host 0.0.0.0` and attention to the firewall. |
+| Dashboard has data but the curves do not move | SSE disconnects reconnect automatically; confirm the page is not suspended or refresh it to pull a new snapshot. |
+| History is empty after a dashboard refresh | Requires `--storage sqlite/both` and data in the database; `source=db` silently degrades when the database or table is missing. |
+| `history_report.py` reports the database does not exist | Generate data first: `miband_client.py 60` or `--demo`. |
+| A sleep report shows `unknown` for one night | That night has no heart rate: only the sleep duration can be given, and staging cannot be guessed. |
+| A whole night of not wearing the band is counted as sleep | The current version uses `kind & 0x0F == 3` to detect non-wear and does not create a sleep segment; if it is still abnormal, please attach the data. |
 
-## 退出与稳定性
+## Exit and stability
 
-| 现象 | 原因/处理 |
+| Symptom | Cause / handling |
 |---|---|
-| 连接一段时间后断开 | 手环省电/离体/手机抢占；默认指数退避自动重连。 |
-| Ctrl+C 后没有汇总 | 当前版本会打印 `Storage summary`；若没有，可能进程被强杀或日志被重定向。 |
-| 采集窗口结束但没有 "Reconnecting" 日志 | 属预期：`duration` 用尽后正常返回，不是重连失效。 |
+| Disconnects after a while | Band power saving / taken off / phone contention; exponential backoff reconnects automatically by default. |
+| No summary after Ctrl+C | The current version prints a `Storage summary`; if it does not, the process was probably force-killed or the log was redirected. |
+| Collection window ends but there is no "Reconnecting" log | Expected: after `duration` is exhausted, the program returns normally; reconnection has not failed. |
 
-## 历史问题状态（Linux，2026-11-08 记录）
+## Historical issue status (Linux, recorded 2026-11-08)
 
-[validation/linux-validation.md](../validation/linux-validation.md) 的 L1–L10 中：
+Among L1–L10 in [validation/linux-validation.md](../validation/linux-validation.md):
 
-- **L9（未配对约 36 秒断链 + 误导性 D-Bus 报错）已修复**：文档补配对/trust 步骤，
-  D-Bus 错误被翻译为可操作提示；
-- **L10（ATT MTU 从未协商）已修复**：连接后显式 `_acquire_mtu()`，实测 MTU 23 → 247；
-- 其余为文档/脚本可用性/静默行为类问题，按对应章节处理。
+- **L9 (about 36-second disconnect without pairing + misleading D-Bus errors) is fixed**: the documentation adds pairing/trust steps,
+  and D-Bus errors are translated into actionable hints;
+- **L10 (ATT MTU never negotiated) is fixed**: `_acquire_mtu()` is called explicitly after connecting, and the measured MTU goes from 23 → 247;
+- The rest are documentation/script usability/silent-behavior issues, handled in the corresponding sections.
 
-## 仍然无解/待验证
+## Still unresolved / to be verified
 
-- Windows/macOS 真机行为仍需在对应系统验证（代码层兼容已完成）；
-- 手环三字节"阶段分数"与 Zepp 时长的映射未定案，睡眠分期为推导值；
-- 0x26 的 `duration/signal/extend` 语义未定，仍标 `[experimental]`。
+- Real-device behavior on Windows/macOS still needs verification on those systems (code-level compatibility is complete);
+- The mapping between the band's three-byte "stage scores" and Zepp durations is not settled; sleep staging is a derived value;
+- The semantics of 0x26 `duration/signal/extend` are not settled and remain marked `[experimental]`.

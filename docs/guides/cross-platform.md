@@ -1,181 +1,183 @@
-# 跨平台运行与验证指南（Linux / Windows / macOS）
+**English** · [简体中文](cross-platform.zh-CN.md)
 
-本项目最初在 Linux（BlueZ）上开发，现已做代码层跨平台改造。BLE 访问由
-[`bleak`](https://github.com/hbldh/bleak) 统一封装（Linux/BlueZ、Windows/WinRT、
-macOS/CoreBluetooth），因此不需要为每个系统维护一套蓝牙代码；跨平台差异集中在
-**ECDH 原生库加载**、**设备标识格式** 和 **ATT MTU 上报** 三处，均已处理。
+# Cross-Platform Running and Validation Guide (Linux / Windows / macOS)
 
-> 文档导航：[文档中心](../README.md) · [安装](installation.md) · [配置](configuration.md) ·
-> [使用](usage.md) · [测试](testing.md)
+This project was originally developed on Linux (BlueZ) and has now been refactored to be cross-platform at the code level. BLE access is
+uniformly wrapped by [`bleak`](https://github.com/hbldh/bleak) (Linux/BlueZ, Windows/WinRT,
+macOS/CoreBluetooth), so there is no need to maintain a separate Bluetooth stack per system; cross-platform differences are concentrated in
+**native ECDH library loading**, **device identifier format** and **ATT MTU reporting**, all of which are handled.
+
+> Documentation navigation: [Documentation hub](../README.md) · [Installation](installation.md) · [Configuration](configuration.md) ·
+> [Usage](usage.md) · [Testing](testing.md)
 >
-> 本指南同时是 Windows/Linux 真机验证的操作清单；测试结果请按
-> [§7 反馈信息](#7-提交问题或验证结果时需要的信息) 收集。
+> This guide also serves as the operational checklist for real-device validation on Windows/Linux; for test results, collect
+> [§7 Feedback information](#7-information-to-include-in-a-bug-report).
 
 ---
 
-## 1. 平台支持矩阵
+## 1. Platform support matrix
 
-| 项目 | Linux | Windows 10/11 | macOS 12+ |
+| Item | Linux | Windows 10/11 | macOS 12+ |
 |---|---|---|---|
-| BLE 后端 | BlueZ（`dbus-fast`） | WinRT（`winrt-*`） | CoreBluetooth（`pyobjc`） |
-| 设备标识 | 蓝牙 MAC | 蓝牙 MAC | **CoreBluetooth UUID**（不暴露 MAC） |
-| 名称匹配 `DEVICE_NAME` | 支持 | 支持 | 支持（推荐） |
-| ECDH 后端 | 原生 `libecdh.so`（自动编译） | 纯 Python（可选手动放 `libecdh.dll`） | 纯 Python（可选手动编译 `.dylib`） |
-| 状态 | 已验证（软件链路 + 真机，需先配对） | **待真机验证** | 代码兼容，待验证 |
+| BLE backend | BlueZ (`dbus-fast`) | WinRT (`winrt-*`) | CoreBluetooth (`pyobjc`) |
+| Device identifier | Bluetooth MAC | Bluetooth MAC | **CoreBluetooth UUID** (MAC is not exposed) |
+| Name matching `DEVICE_NAME` | Supported | Supported | Supported (recommended) |
+| ECDH backend | native `libecdh.so` (auto-compiled) | pure Python (optionally place `libecdh.dll` manually) | pure Python (optionally compile a `.dylib` manually) |
+| Status | Verified (software path + real device, pairing required first) | **Pending real-device validation** | Code-compatible, pending validation |
 
-ECDH 后端选择规则（实现见 `miband_monitor/crypto/`）：
+ECDH backend selection rules (implementation in `miband_monitor/crypto/`):
 
-1. `MIBAND_ECDH_LIB` 指定的库 → 2. 项目根目录下当前平台的库文件
-（`libecdh.so` / `libecdh.dll` / `libecdh.dylib`）→ 3. 尝试用 `gcc`/`clang` 现场编译 →
-4. 纯 Python 回退（`vendor/tiny_ecdh/`）。
+1. The library specified by `MIBAND_ECDH_LIB` → 2. The current platform's library file under the project root
+(`libecdh.so` / `libecdh.dll` / `libecdh.dylib`) → 3. Try to compile on the spot with `gcc`/`clang` →
+4. Pure-Python fallback (`vendor/tiny_ecdh/`).
 
-启动日志会打印实际使用哪个后端：
+The startup log prints which backend is actually in use:
 
 ```
-[INFO] MiBand6Client: ECDH backend: native      # Linux 常见
-[INFO] MiBand6Client: ECDH backend: python      # Windows/macOS 常见
+[INFO] MiBand6Client: ECDH backend: native      # common on Linux
+[INFO] MiBand6Client: ECDH backend: python      # common on Windows/macOS
 ```
 
-可用环境变量强制切换以便排查：`MIBAND_ECDH_BACKEND=auto|native|python`。
-两种后端已做逐字节交叉校验（`tests/test_ecdh_backends.py`），可安全互换。
+You can force a switch for troubleshooting with the environment variable: `MIBAND_ECDH_BACKEND=auto|native|python`.
+The two backends have been cross-checked byte for byte (`tests/test_ecdh_backends.py`) and are safely interchangeable.
 
 ---
 
 ## 2. Linux
 
-### 2.1 依赖
+### 2.1 Dependencies
 
 ```bash
-# Debian/Ubuntu 示例
+# Debian/Ubuntu example
 sudo apt-get install -y python3-venv python3-pip bluez
 sudo systemctl enable --now bluetooth
 ```
 
-### 2.2 安装与冒烟测试
+### 2.2 Installation and smoke test
 
 ```bash
 cd miband_health_monitor
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 
-# 环境自检：适配器 / 配对状态 / ECDH 后端 / .env 权限，一次看全
+# Environment self-check: adapter / pairing state / ECDH backend / .env permissions, all at once
 .venv/bin/python miband_client.py --doctor
 
-# 无硬件：单元测试 + 全链路 demo
+# No hardware: unit tests + full-path demo
 .venv/bin/python -m pytest -q
 .venv/bin/python miband_client.py --demo 2 --imu --output data/demo --export-csv
 ```
 
-### 2.3 真机（区分“首次无缓存配对”与“已有缓存日常使用”）
+### 2.3 Real device (distinguish "first pairing without cache" from "daily use with existing cache")
 
-Linux/BlueZ 与 Windows 不同：系统不会在无 agent 时自动完成 SMP 配对；且**首次连接尚无 GATT 缓存时，
-手环只给约 9–9.8 秒的未认证枚举窗口**（需逐个读取 ~150 个句柄），若当时手环处于休眠连接间隔会被踢断，
-日志表现为 `failed to discover services, device disconnected` 或
-`UnknownObject: Method "WriteValue" ... doesn't exist`。
+Linux/BlueZ differs from Windows: the system does not complete SMP pairing automatically without an agent; and **when the first connection has no GATT cache yet,
+the band only provides an unauthenticated enumeration window of about 9–9.8 seconds** (about 150 handles must be read one by one), so if the band is in a sleepy connection interval at that time it will be kicked off,
+and the log shows `failed to discover services, device disconnected` or
+`UnknownObject: Method "WriteValue" ... doesn't exist`.
 
-#### 场景 A：首次配对 / 主机无 BlueZ 设备缓存
+#### Scenario A: First pairing / host with no BlueZ device cache
 
-当你刚在 `--doctor` 看到 `device not known to BlueZ yet`（新主机，或刚执行过 `bluetoothctl remove` 清空缓存）时：
+When `--doctor` has just reported `device not known to BlueZ yet` (new host, or you just ran `bluetoothctl remove` to clear the cache):
 
 ```bash
-# 0) 自检：确认适配器 powered=yes 且手机蓝牙已关闭
+# 0) Self-check: confirm the adapter is powered=yes and the phone's Bluetooth is off
 .venv/bin/python miband_client.py --doctor
 
-# 1) 填好配置（至少 DEVICE_ID 与 AUTH_KEY）
+# 1) Fill in the configuration (at least DEVICE_ID and AUTH_KEY)
 cp .env.example .env
 
-# 2) 推荐方式：开启进程内配对 agent，直接走首次扫描 + 自动信任 + SMP 配对
-#    （保持手环在 1 米内并尽量亮屏/佩戴，便于 ~9s 看门狗内完成首次 GATT 枚举）
+# 2) Recommended: enable the in-process pairing agent and go straight to first scan + automatic trust + SMP pairing
+#    (keep the band within 1 meter and try to keep the screen on/worn, so the first GATT enumeration completes within the ~9s watchdog)
 MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 60 --log-level INFO
 ```
 
-**首次无缓存配对机制与注意事项：**
-- **无需手敲 `bluetoothctl pair`**：带 `MIBAND_BLUEZ_AGENT=1` 运行时，客户端会在扫描捕获 40–60s 脉冲后、发起 `Device1.Connect` 之前自动设置适配器 `Pairable=on` 与设备 `Trusted=True`，并用内置 `NoInputNoOutput` agent 放行目标手环的 SMP 请求；若刚好卡在超时边缘连上，还会触发 10 秒 `SERVICE_RESOLVE_GRACE` 宽限确保首次枚举完成。
-- **不建议直接手工提前 `pair`**：若手机端仍未断开或持有互斥绑定，手工 `bluetoothctl pair` 容易直接被手环拒绝（`AuthenticationCanceled`）。
-- **必须保留的 `.env` 凭证**：删除主机 BlueZ 缓存不影响 `.env`；但如果你还对手环做了**恢复出厂设置或 Zepp Life 解绑重绑**，手环内置 `AUTH_KEY` 会更新，必须重新提取并更新 `.env` 才能通过应用层 ECDH 认证。
-- **公共广播前提**：手环重启后可能丢失易失“公共广播”状态；若 120s 仍扫不到脉冲，先用手机 Zepp Life 连一次手环再关掉手机蓝牙。
+**First cacheless pairing mechanism and caveats:**
+- **No need to type `bluetoothctl pair` manually**: when running with `MIBAND_BLUEZ_AGENT=1`, after the scan captures a 40–60s pulse and before issuing `Device1.Connect`, the client automatically sets the adapter `Pairable=on` and the device `Trusted=True`, and uses the built-in `NoInputNoOutput` agent to let the target band's SMP requests through; if the link happens to come up right at the timeout edge, it also triggers a 10-second `SERVICE_RESOLVE_GRACE` grace period to ensure the first enumeration completes.
+- **Do not manually `pair` in advance**: if the phone is still connected or holds a mutually exclusive bond, a manual `bluetoothctl pair` is easily rejected outright by the band (`AuthenticationCanceled`).
+- **`.env` credentials that must be kept**: deleting the host's BlueZ cache does not affect `.env`; but if you also **factory-reset the band or unbind/rebind it in Zepp Life**, the band's built-in `AUTH_KEY` is updated, and you must re-extract it and update `.env` to pass application-layer ECDH authentication.
+- **Public advertising prerequisite**: after a band reboot the volatile "public advertising" state may be lost; if no pulse is found within 120s, connect once to the band with the phone's Zepp Life and then turn off the phone's Bluetooth.
 
-#### 场景 B：已有设备缓存 / 正常日常复连（勿盲目删配对）
+#### Scenario B: Existing device cache / normal daily reconnection (do not blindly delete the pairing)
 
-当你用 `--doctor` 看到设备已处于 `paired=yes trusted=yes`（首次配对完成后就会持久写入 BlueZ）：
+When `--doctor` shows the device is already `paired=yes trusted=yes` (written persistently to BlueZ once first pairing completes):
 
 ```bash
-# 日常直接运行即可，不要再加 MIBAND_BLUEZ_AGENT=1，也不要每次先 bluetoothctl remove
+# For daily use just run it directly; do not add MIBAND_BLUEZ_AGENT=1, and do not run bluetoothctl remove before every connection
 .venv/bin/python miband_client.py 60
 ```
 
-**有缓存情况下的重要原则：**
-1. **切勿每次连接前都清空 BlueZ 缓存**：每次 `remove` 都会销毁 GATT 服务表缓存与 `direct connect` 免扫描快路径，重新暴露在 ~9s 未认证看门狗下；若手机端未彻底断连还会增加 `AuthenticationCanceled` 概率。
-2. **手机 Zepp Life 正常同步不会破坏现有配对**：实测证明手机端完成同步并关闭蓝牙后，Linux 侧已有 `Paired / Bonded / Trusted` 密钥依然完好，直接默认命令即可 1 次直连成功（`0 WARNING / 0 ERROR`）。
-3. **何时才需要清缓存重配（与自动自愈）**：仅当手环换绑其他主控导致 BlueZ 持有的 `LTK` 陈旧失效（典型症状为建链后约 5 秒且 `ServicesResolved=False` 掉线）时才需要重配。客户端在连续命中 2 次未解析断链且确认设备为 `Paired=yes` 时会自动调用 `remove_device()` 清缓存并拉起 agent 自愈；如需手动恢复，可执行：
+**Important principles when a cache exists:**
+1. **Never clear the BlueZ cache before every connection**: every `remove` destroys the GATT service-table cache and the `direct connect` scan-free fast path, exposing you again to the ~9s unauthenticated watchdog; and if the phone is not fully disconnected it also increases the chance of `AuthenticationCanceled`.
+2. **A normal Zepp Life sync on the phone does not break the existing pairing**: measurement shows that after the phone completes a sync and turns Bluetooth off, the existing `Paired / Bonded / Trusted` keys on the Linux side remain intact, and the default command connects directly on the first attempt (`0 WARNING / 0 ERROR`).
+3. **When you actually need to clear the cache and re-pair (and automatic self-healing)**: only when the band has been re-bound to another host, making the `LTK` held by BlueZ stale (typical symptom: disconnection about 5 seconds after the link is established with `ServicesResolved=False`). When the client hits 2 consecutive unresolved disconnects and confirms the device is `Paired=yes`, it automatically calls `remove_device()` to clear the cache and starts the agent to self-heal; for manual recovery, run:
    ```bash
    bluetoothctl remove AA:BB:CC:DD:EE:FF
    MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 60
    ```
-4. **若上次强杀留下 `Connected=yes` 残留**：客户端会自动清理幽灵连接（`Connected=True, ServicesResolved=False`）；若复用半温连接（`Connected=True, ServicesResolved=True`）时握手失败，也会主动 `disconnect_device()` 回退到干净初态重连。
+4. **If a previous force-kill left a `Connected=yes` residue**: the client automatically cleans up ghost connections (`Connected=True, ServicesResolved=False`); if the handshake fails when reusing a half-warm connection (`Connected=True, ServicesResolved=True`), it also actively calls `disconnect_device()` to fall back to a clean initial state and reconnect.
 
-（如需手工执行传统只 trust 不 pair 的旧步骤，可执行 `bluetoothctl scan on` 捕捉脉冲后 `bluetoothctl trust AA:BB:CC:DD:EE:FF`。）
+(If you want to perform the old manual steps of only trusting without pairing, you can run `bluetoothctl scan on` to capture a pulse and then `bluetoothctl trust AA:BB:CC:DD:EE:FF`.)
 
-关于广播频率（**已实测，与旧文档相反**）：手机蓝牙关闭后，小米手环 6
-**每 40–60 秒才发出 1 个孤立的可连接广播脉冲，屏幕熄灭时完全不发**；
-点亮或滑动屏幕**不会**让它发得更快，只影响建链后的连接间隔。
-因此 Linux 路径改为：扫到第一个脉冲后**把一个 `Device1.Connect` 一直挂着**
-（最长 70 秒，覆盖整个脉冲周期），而不是"连 15 秒失败就回去重扫"。
+About the advertising frequency (**measured, contrary to older documentation**): after the phone's Bluetooth is turned off, the Mi Band 6
+**only emits 1 isolated connectable advertising pulse every 40–60 seconds, and emits none at all when the screen is off**;
+waking or swiping the screen does **not** make it advertise faster, it only affects the connection interval after the link is established.
+Therefore the Linux path was changed to: after scanning the first pulse, **keep one `Device1.Connect` pending**
+(for up to 70 seconds, covering the entire pulse cycle), instead of "fail after 15 seconds then go back to scanning".
 
-`trust` / 首次配对持久化之后：
+After `trust` / first-pairing persistence:
 
-- BlueZ 会保留设备对象与 GATT 缓存；后续连接不再需要重新枚举 150 个句柄，
-  内核还能在手环出现时自动回连（实测 2026-11-12：连续 6 次自动回连，间隔约 61 秒）；
-- 连接不再依赖"恰好扫到广播期间按下回车"——待命中的 `Connect` 会等到脉冲；
-- ATT MTU 会显式协商（此前恒为 23 字节）。
+- BlueZ keeps the device object and GATT cache; subsequent connections no longer need to re-enumerate 150 handles,
+  and the kernel can also auto-reconnect when the band appears (measured 2026-11-12: 6 consecutive auto-reconnects, interval about 61 seconds);
+- Connection no longer depends on "pressing Enter exactly during advertising" — the pending `Connect` waits for the pulse;
+- ATT MTU is negotiated explicitly (previously always 23 bytes).
 
-详细证据与实测报告见 [Linux 连接排查纪实](../validation/linux-ble-connect-findings.md) 与
-[Linux BLE 受控复测与陈旧 LTK 报告](../validation/linux-ble-test-report.md)。
+For detailed evidence and measurement reports, see [Linux connection troubleshooting chronicle](../validation/linux-ble-connect-findings.md) and
+[Linux BLE controlled retest and stale LTK report](../validation/linux-ble-test-report.md).
 
-### 2.4 常见问题
+### 2.4 Common problems
 
-| 现象 | 处理 |
+| Symptom | Handling |
 |---|---|
-| `org.bluez was not provided` / `No Bluetooth adapters found` | `bluetooth` 服务未运行或无适配器；WSL2 不支持蓝牙，请用原生 Linux |
-| 扫描不到 | 手机蓝牙关闭；确认手环的公共广播仍被使能（用 Zepp Life 连一次，再关手机蓝牙）。手环每 40–60 秒才发一个脉冲，`--scan-timeout` 用 120。若**任何设备的包都收不到**，见下一行 |
-| 扫描器在跑、`hciconfig` 计数在涨，但 25 秒内**一个 BLE 包都没有** | 适配器射频假死（BARROT `33fa:0012` 在取消挂起连接后会出现）：`sudo usbreset <vid:pid>` 或拔插 USB，再 `sudo systemctl restart bluetooth`。**D-Bus 的 `Powered=false/true` 无效** |
-| 权限不足 | 普通用户通常可用；若受限，检查 polkit/`bluetooth` 组或使用桌面会话 |
-| 建链后 9–10 秒被断，日志 `failed to discover services, device disconnected` | 手环的未认证连接看门狗到期（首次连接要枚举 ~150 个 GATT 句柄）。客户端会自动重试；`trust` 一次后 BlueZ 缓存服务表即可避免 |
-| 连上 40 秒左右就断，日志 `UnknownObject ... doesn't exist` | 未 `trust`。先让 `bluetoothctl trust <MAC>` 生效；确需 Bond 时才 `pair`（仍绑定手机的手环会 `AuthenticationCanceled`） |
-| 连接时 BlueZ 日志出现 `No agent available for request type 2` | 手环发起了 SMP 认证而系统没有 agent。`MIBAND_BLUEZ_AGENT=1` 让客户端注册 `NoInputNoOutput` agent 自动放行 |
-| 日志出现 `le-connection-abort-by-local` | 内核 40 秒发起周期内没等到手环脉冲；客户端会自动重挂，无需干预 |
-| 启动日志 `MTU=23` 并伴随 `Using default MTU value` 警告 | 旧版本行为；当前版本会主动协商。若仍出现，加 `--log-level DEBUG` 查看 `_acquire_mtu` 失败原因 |
-| 每次都要等几十秒才连上 | 正常：无手机链路的手环每 40–60 秒才发一个脉冲。`trust` 一次后 BlueZ 会缓存 GATT 表并自动回连，第二次开始通常几秒内完成 |
+| `org.bluez was not provided` / `No Bluetooth adapters found` | The `bluetooth` service is not running or there is no adapter; WSL2 does not support Bluetooth, use native Linux |
+| Cannot scan | Phone Bluetooth is off; confirm the band's public advertising is still enabled (connect once with Zepp Life, then turn off phone Bluetooth). The band only emits one pulse every 40–60 seconds; set `--scan-timeout` to 120. If **no packets from any device** are received, see the next row |
+| Scanner is running, `hciconfig` counters increase, but within 25 seconds **not a single BLE packet arrives** | Adapter radio hang (BARROT `33fa:0012` exhibits this after cancelling a pending connection): `sudo usbreset <vid:pid>` or unplug/replug USB, then `sudo systemctl restart bluetooth`. **D-Bus `Powered=false/true` has no effect** |
+| Insufficient permissions | Normal users can usually do this; if restricted, check polkit/the `bluetooth` group or use a desktop session |
+| Dropped 9–10 seconds after the link is established, log `failed to discover services, device disconnected` | The band's unauthenticated connection watchdog expires (the first connection must enumerate ~150 GATT handles). The client retries automatically; one `trust` lets BlueZ cache the service table and avoids it |
+| Disconnects after about 40 seconds, log `UnknownObject ... doesn't exist` | Not `trust`ed. Let `bluetoothctl trust <MAC>` take effect first; only `pair` when Bond is really needed (a band still bound to the phone gives `AuthenticationCanceled`) |
+| BlueZ log shows `No agent available for request type 2` while connecting | The band initiated SMP authentication but the system has no agent. `MIBAND_BLUEZ_AGENT=1` makes the client register a `NoInputNoOutput` agent to let it through automatically |
+| Log shows `le-connection-abort-by-local` | The kernel initiated within its 40-second cycle without a band pulse; the client re-arms automatically, no intervention needed |
+| Startup log says `MTU=23` with a `Using default MTU value` warning | Old-version behavior; current versions negotiate explicitly. If it still appears, add `--log-level DEBUG` to see why `_acquire_mtu` failed |
+| Every connection takes tens of seconds | Normal: a band with no phone link only emits one pulse every 40–60 seconds. After one `trust`, BlueZ caches the GATT table and reconnects automatically, usually within seconds from the second time on |
 
-### 2.5 Linux 专属行为说明
+### 2.5 Linux-specific behavior notes
 
-| 行为 | 说明 |
+| Behavior | Description |
 |---|---|
-| 直连优先 | 已真正绑定（bonded）设备从 BlueZ 对象树直接连接；`Connected+ServicesResolved` 的连接直接复用；不再信任"有 RSSI 就算新鲜"的缓存对象 |
-| 待命建链 | 扫到脉冲后由一个长驻 `Device1.Connect` 覆盖整个 70 秒广播周期，内核 40 秒 abort 后约 150 ms 自动重挂；**全程不发 `Disconnect`**（取消挂起连接会让部分适配器扫描假死） |
-| 内置配对 Agent | `MIBAND_BLUEZ_AGENT=1` 时在系统 D-Bus 注册 `org.bluez.Agent1`（`NoInputNoOutput`），自动放行目标手环 SMP 请求；首次无缓存配对建议开启，已有健康配对后无需开启 |
-| 服务解析宽限 | 若在 70 s 待命预算截止前恰好物理建链（`Connected=True`），`wait_for_bluez_link()` 额外授予 10 s `SERVICE_RESOLVE_GRACE` 避免打断首次 GATT 枚举 |
-| 残留连接自愈 | 发现 `Connected=True, ServicesResolved=False` 幽灵残留时先清再连；复用已连接对象却建链/认证失败时主动 `disconnect_device()` 回退干净状态 |
-| 陈旧 LTK 自愈 | 若已配对设备连续命中 `dropped_unresolved >= 2`（约 5 s 加密超时掉线），自动 `remove_device()` 并临时拉起配对 agent 重建干净绑定（每次运行至多一次） |
-| 扫描参数 | `DuplicateData=False`（BT 5/6 上 `True` 会让 BlueZ 每 ~5 秒重启扩展扫描）；`MIBAND_BLUEZ_DUPLICATE_DATA=1` 可恢复 |
-| SMP 结算等待 | `ServicesResolved` 后等 1.5 秒再发第一条 GATT 写，避免堵在 BlueZ 的 `new_auth` + HID/device-info 探测后面 |
-| Fast Retry | 遇 `le-connection-abort-by-local`、`InProgress`、`failed to discover services` 原地重试，不再嵌套重扫 |
-| GATT 写锁 | 引入类 Gadgetbridge `BtLEQueue` 机制，写操作全局串行化，遇 `InProgress` 自动重试 |
-| 极速重连 | 会话认证成功后重置退避延迟，意外断连后以 0.3s 极速重连，抓住断开瞬间高频广播窗口 |
-| `--no-direct-connect` | 强制走扫描路径，便于排查"直连拿到的是旧对象"这类问题 |
-| MTU 协商 | 连接后调用 bleak 的 `_acquire_mtu()`；WinRT 由系统自动完成 |
-| 配对状态 | `Trusted: yes` 是内核自动回连与 GATT 缓存的前提；`Paired: yes` 仅在需要加密链路/Bond 时必要 |
-| 适配器复位 | BARROT `33fa:0012` 出现 `-112`/零广播后只能 USB 级复位，D-Bus 电源循环无效；`--doctor` 与扫描心跳都会给出该提示 |
+| Direct-connect priority | Genuinely bonded devices are connected directly from the BlueZ object tree; connections with `Connected+ServicesResolved` are reused directly; cached objects are no longer trusted merely because they have an RSSI |
+| Pending link establishment | After a pulse is scanned, one long-lived `Device1.Connect` covers the entire 70-second advertising cycle, and after the kernel's 40-second abort it re-arms automatically in about 150 ms; **no `Disconnect` is ever sent** (cancelling a pending connection makes some adapters' scanning hang) |
+| Built-in pairing agent | With `MIBAND_BLUEZ_AGENT=1`, registers `org.bluez.Agent1` (`NoInputNoOutput`) on the system D-Bus and automatically lets the target band's SMP requests through; recommended for first cacheless pairing, not needed once a healthy pairing exists |
+| Service-resolution grace | If the physical link happens to come up (`Connected=True`) just before the 70 s pending budget expires, `wait_for_bluez_link()` grants an extra 10 s `SERVICE_RESOLVE_GRACE` to avoid interrupting the first GATT enumeration |
+| Stale-connection self-healing | When a ghost residue `Connected=True, ServicesResolved=False` is found, clear it before connecting; when reusing an already-connected object but link establishment/authentication fails, actively call `disconnect_device()` to fall back to a clean state |
+| Stale-LTK self-healing | If a paired device hits `dropped_unresolved >= 2` consecutively (disconnect after about 5 s of encryption timeout), automatically `remove_device()` and temporarily start the pairing agent to rebuild a clean bond (at most once per run) |
+| Scan parameters | `DuplicateData=False` (on BT 5/6, `True` makes BlueZ restart extended scanning every ~5 seconds); `MIBAND_BLUEZ_DUPLICATE_DATA=1` restores it |
+| SMP settlement wait | Wait 1.5 seconds after `ServicesResolved` before sending the first GATT write, to avoid queueing behind BlueZ's `new_auth` + HID/device-info probing |
+| Fast Retry | On `le-connection-abort-by-local`, `InProgress`, `failed to discover services`, retry in place without nested rescans |
+| GATT write lock | Introduces a Gadgetbridge-like `BtLEQueue` mechanism: writes are globally serialized, and `InProgress` retries automatically |
+| Fast reconnect | After session authentication succeeds the backoff delay is reset; after an unexpected disconnect it reconnects within 0.3s to catch the high-frequency advertising window right at disconnect |
+| `--no-direct-connect` | Forces the scan path, useful for debugging issues such as "direct connect got a stale object" |
+| MTU negotiation | After connecting, calls bleak's `_acquire_mtu()`; on WinRT the system does this automatically |
+| Pairing state | `Trusted: yes` is the prerequisite for kernel auto-reconnect and GATT caching; `Paired: yes` is only necessary when an encrypted link/Bond is needed |
+| Adapter reset | BARROT `33fa:0012` showing `-112`/zero advertising can only be reset at the USB level; D-Bus power cycling has no effect; both `--doctor` and the scan heartbeat give this hint |
 
 ---
 
 ## 3. Windows 10/11
 
-### 3.1 Python 与依赖
+### 3.1 Python and dependencies
 
-推荐从 [python.org](https://www.python.org/downloads/) 安装 Python 3.10+（勾选
-“Add python.exe to PATH”），不要用 Microsoft Store 的 Python 做 BLE 开发时仍可用，
-但 python.org 版本排查更方便。
+Python 3.10+ from [python.org](https://www.python.org/downloads/) is recommended (check
+"Add python.exe to PATH"); the Microsoft Store Python still works for BLE development,
+but the python.org build is easier to troubleshoot.
 
 ```powershell
 cd miband_health_monitor
@@ -184,79 +186,79 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe -m pip install -r requirements.txt
 ```
 
-`bleak` 会自动安装 WinRT 相关依赖（`winrt-runtime`、`winrt-windows-devices-bluetooth` 等），
-无需手工处理，也不需要 Visual Studio / gcc。
+`bleak` installs the WinRT-related dependencies automatically (`winrt-runtime`, `winrt-windows-devices-bluetooth`, etc.),
+so no manual handling is needed, and neither Visual Studio nor gcc is required.
 
-### 3.2 冒烟测试（不需要手环）
+### 3.2 Smoke test (no band needed)
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -q
 .venv\Scripts\python.exe miband_client.py --demo 2 --imu --output data\demo --export-csv
 ```
 
-预期：全部通过（当前 `241 passed, 4 skipped`，跳过项需要真实抓包数据）；
-demo 生成 `data\demo\*.jsonl`、`mi_band.db` 与 `csv\`。
-这两步通过说明 Python、依赖、ECDH 纯 Python 后端、存储、看板、导出链路在
-Windows 上都正常，剩下的只有真实 BLE 链路。
+Expected: all pass (currently `241 passed, 4 skipped`; the skipped cases need real capture data);
+the demo produces `data\demo\*.jsonl`, `mi_band.db` and `csv\`.
+If these two steps pass, Python, dependencies, the pure-Python ECDH backend, storage, the dashboard and the export path are all working on
+Windows, leaving only the real BLE link.
 
-### 3.3 蓝牙环境检查
+### 3.3 Bluetooth environment check
 
-1. “设置 → 蓝牙和其他设备”：蓝牙开关为开，能看到手环历史记录；
-2. 设备管理器确认蓝牙适配器无黄色感叹号，驱动为厂商/WinRT 兼容驱动；
-3. 若手环此前被这台电脑连接过：在“蓝牙和其他设备”里**删除设备**再重试
-   （Windows 的 BLE 设备缓存有时会导致连接失败）；
-4. 手机蓝牙关闭 / 飞行模式，避免手环被手机占连；
-5. 不需要一直滑屏：手环每 40–60 秒才发一个广播脉冲（熄屏时不发，滑屏也不会加快），
-   因此 `--scan-timeout` 用 120，等它自己出现即可。
+1. "Settings → Bluetooth & other devices": the Bluetooth switch is on and the band's history entry is visible;
+2. In Device Manager, confirm the Bluetooth adapter has no yellow exclamation mark and uses a vendor/WinRT-compatible driver;
+3. If the band was previously connected to this computer: **remove the device** under "Bluetooth & other devices" and retry
+   (Windows' BLE device cache sometimes causes connection failures);
+4. Turn off phone Bluetooth / enable airplane mode, to avoid the band staying connected to the phone;
+5. No need to keep swiping the screen: the band only emits one advertising pulse every 40–60 seconds (none with the screen off, and swiping does not speed it up),
+   so set `--scan-timeout` to 120 and just wait for it to appear.
 
-### 3.4 运行
+### 3.4 Running
 
 ```powershell
-copy .env.example .env      # 填 DEVICE_ID（蓝牙 MAC）与 AUTH_KEY
+copy .env.example .env      # fill in DEVICE_ID (Bluetooth MAC) and AUTH_KEY
 .venv\Scripts\python.exe scan_ble.py
 .venv\Scripts\python.exe miband_client.py 60 --log-level DEBUG
-.venv\Scripts\python.exe miband_client.py --demo 30 --web-port 8080   # 看板自测
+.venv\Scripts\python.exe miband_client.py --demo 30 --web-port 8080   # dashboard self-test
 ```
 
-### 3.5 Windows 常见问题
+### 3.5 Windows common problems
 
-| 现象 | 原因/处理 |
+| Symptom | Cause / handling |
 |---|---|
-| `OSError: [WinError 193]` / 加载 `libecdh.so` 失败 | 老版本问题，当前版本会自动回退纯 Python；确认启动日志是 `ECDH backend: python` |
-| `BleakError: ... was not found` | 地址不对或手环未广播：用 `scan_ble.py` 核对；确认手环未被手机占用 |
-| `BleakError: ... Unreachable` / 连接超时 | 删除 Windows 里的旧设备记录后重试；换 USB 蓝牙适配器（部分廉价适配器 BLE 支持不完整） |
-| 扫描列表为空 | Windows 蓝牙开关/适配器问题；用系统“添加设备”页面确认能发现手环 |
-| 连接后很快断开 | 手环息屏/离体；保持佩戴与屏幕活动，或提高 `SCAN_TIMEOUT` |
-| 认证超时 | 用 `--log-level DEBUG` 观察分块通知；`--mtu` 保持默认，特殊适配器可尝试 `--mtu 185` / `--mtu 247` |
-| 公司电脑无法开启蓝牙 | 组策略/驱动限制，需要管理员处理，与本项目无关 |
+| `OSError: [WinError 193]` / loading `libecdh.so` fails | Old-version issue; the current version falls back to pure Python automatically; confirm the startup log says `ECDH backend: python` |
+| `BleakError: ... was not found` | Wrong address or the band is not advertising: verify with `scan_ble.py`; confirm the band is not occupied by the phone |
+| `BleakError: ... Unreachable` / connection timeout | Delete the old device record in Windows and retry; try another USB Bluetooth adapter (some cheap adapters have incomplete BLE support) |
+| Scan list is empty | Windows Bluetooth switch/adapter issue; use the system's "Add device" page to confirm the band can be discovered |
+| Disconnects soon after connecting | The band's screen is off / it is off the wrist; keep it worn and the screen active, or increase `SCAN_TIMEOUT` |
+| Authentication timeout | Use `--log-level DEBUG` to watch chunked notifications; keep `--mtu` at the default, and for special adapters try `--mtu 185` / `--mtu 247` |
+| Company computer cannot enable Bluetooth | Group policy/driver restriction; requires an administrator, unrelated to this project |
 
-> 提示：`--mtu` 是“手动覆盖”，并非自动协商。设置值大于实际协商 MTU 时，
-> 分块写会失败（认证超时/写特征报错）。没有明确依据时请保持默认（不传 `--mtu`）。
+> Tip: `--mtu` is a "manual override", not automatic negotiation. If the configured value is larger than the actually negotiated MTU,
+> chunked writes fail (authentication timeout/characteristic write errors). Without a clear basis, keep the default (do not pass `--mtu`).
 
-### 3.6 ECDH 原生加速（可选）
+### 3.6 Native ECDH acceleration (optional)
 
-不需要编译器也能正常使用。若想在 Windows 上用原生实现：
+It works fine without a compiler. If you want the native implementation on Windows:
 
-- 用 MinGW-w64 的 gcc：`gcc -O3 -shared -DECDH_BUILD_DLL ecdh.c -o libecdh.dll`，
-  把 `libecdh.dll` 放在项目根目录；或
-- 用 MSVC 开发者命令行：
-  `cl /nologo /O2 /LD /DECDH_BUILD_DLL ecdh.c /Fe:libecdh.dll`（会在当前目录产生
-  `.obj` 文件，可手动清理），同样放到项目根目录；或
-- 用 `MIBAND_ECDH_LIB=C:\path\to\libecdh.dll` 指定任意位置。
+- With MinGW-w64 gcc: `gcc -O3 -shared -DECDH_BUILD_DLL ecdh.c -o libecdh.dll`,
+  and put `libecdh.dll` in the project root; or
+- With an MSVC developer command prompt:
+  `cl /nologo /O2 /LD /DECDH_BUILD_DLL ecdh.c /Fe:libecdh.dll` (this produces
+  `.obj` files in the current directory, which you can clean up manually), and likewise put it in the project root; or
+- Use `MIBAND_ECDH_LIB=C:\path\to\libecdh.dll` to point at any location.
 
-启动日志显示 `ECDH backend: native` 即生效；失败时仍会静默回退纯 Python，不影响功能。
+The startup log showing `ECDH backend: native` means it is in effect; on failure it still silently falls back to pure Python, without affecting functionality.
 
 ---
 
-## 4. macOS（代码兼容，待真机验证）
+## 4. macOS (code-compatible, pending real-device validation)
 
-- CoreBluetooth 出于隐私不提供 MAC 地址，扫描结果是 **UUID**：
-  `scan_ble.py` 输出中的 `Address` 即 UUID，填到 `DEVICE_ID`；
-- 或直接用 `DEVICE_NAME`（广播名子串，如 `Mi Smart Band`）匹配，跨系统更稳；
-- 首次运行时系统会弹窗请求蓝牙权限，需允许终端/IDE 访问蓝牙
-  （系统设置 → 隐私与安全性 → 蓝牙）；
-- 没有原生 `libecdh.dylib` 时自动使用纯 Python；有 Xcode 命令行工具时也可
-  `clang -O3 -dynamiclib ecdh.c -o libecdh.dylib` 启用原生后端。
+- For privacy, CoreBluetooth does not provide MAC addresses, and scan results are **UUIDs**:
+  `scan_ble.py` prints the UUID as the `Address`; put it into `DEVICE_ID`;
+- Or match directly with `DEVICE_NAME` (advertising-name substring, e.g. `Mi Smart Band`), which is more robust across systems;
+- On first run the system pops up a Bluetooth permission request; you must allow the terminal/IDE to access Bluetooth
+  (System Settings → Privacy & Security → Bluetooth);
+- Without a native `libecdh.dylib` it automatically uses pure Python; with Xcode command-line tools you can also
+  `clang -O3 -dynamiclib ecdh.c -o libecdh.dylib` to enable the native backend.
 
 ```bash
 python3 -m venv .venv
@@ -267,50 +269,50 @@ python3 -m venv .venv
 
 ---
 
-## 5. 设计说明：跨平台兼容层做了什么
+## 5. Design notes: what the cross-platform compatibility layer does
 
-| 差异点 | 处理方式 | 相关代码 |
+| Difference | Handling | Related code |
 |---|---|---|
-| ECDH 需要平台原生库 | 双后端：原生加载/编译 + 纯 Python 回退，字节格式统一 | `miband_monitor/crypto/`、`vendor/tiny_ecdh/` |
-| Windows/macOS 缺少 Linux 的 `.so` | 按 `sys.platform` 选择 `.dll` / `.dylib`，加载失败不致命 | `miband_monitor.crypto.native_library_candidates()` |
-| macOS 没有 MAC | 设备标识与名称双匹配，支持 UUID 格式 | `miband_monitor.ble.identity.device_matches()` |
-| Windows 旧配置 | `DEVICE_MAC` 继续可用，若同时存在则优先 `DEVICE_ID`（忽略占位符） | `miband_monitor.ble.identity._env_device_id()` |
-| ATT MTU 各平台不同 | 连接后解析一次并透传给所有分块写；支持 `--mtu`/`BLE_MTU` 覆盖 | `miband_monitor.ble.mtu` / `MiBand6Client._session_mtu` |
-| 路径 / 编码差异 | 全部使用 `pathlib`，JSONL/CSV/.env 显式 UTF-8 | `miband_monitor/storage/`、`miband_monitor/auth/` |
-| 信号/事件循环 | 不使用 POSIX signal，只用 asyncio；Ctrl+C 由 `asyncio.run` 处理 | `miband_monitor/cli/` |
-| Windows 无 gcc | 纯 Python 回退，安装 `requirements.txt` 即可 | `miband_monitor.crypto.PurePythonEcdhBackend` |
+| ECDH needs a platform-native library | Two backends: native load/compile + pure-Python fallback, with a unified byte format | `miband_monitor/crypto/`, `vendor/tiny_ecdh/` |
+| Windows/macOS lack Linux's `.so` | Select according to `sys.platform` between `.dll` / `.dylib`; a load failure is not fatal | `miband_monitor.crypto.native_library_candidates()` |
+| macOS has no MAC | Dual device matching by identifier and name, with UUID format support | `miband_monitor.ble.identity.device_matches()` |
+| Windows legacy configuration | `DEVICE_MAC` remains usable; if both are present, `DEVICE_ID` wins (placeholders are ignored) | `miband_monitor.ble.identity._env_device_id()` |
+| ATT MTU differs per platform | Parse once after connecting and pass it to all chunked writes; supports `--mtu`/`BLE_MTU` overrides | `miband_monitor.ble.mtu` / `MiBand6Client._session_mtu` |
+| Path / encoding differences | Everything uses `pathlib`; JSONL/CSV/.env explicitly UTF-8 | `miband_monitor/storage/`, `miband_monitor/auth/` |
+| Signals/event loop | No POSIX signals, only asyncio; Ctrl+C is handled by `asyncio.run` | `miband_monitor/cli/` |
+| Windows has no gcc | Pure-Python fallback; installing `requirements.txt` is enough | `miband_monitor.crypto.PurePythonEcdhBackend` |
 
 ---
 
-## 6. 真机验证清单（Linux / Windows 各跑一遍）
+## 6. Real-device validation checklist (run once on each of Linux / Windows)
 
-准备：手环电量 ≥ 30%，佩戴中；手机蓝牙关闭；`.env` 已配置 `DEVICE_ID` + `AUTH_KEY`；
-先用 `--demo` 确认软件链路。
+Preparation: band battery ≥ 30%, worn; phone Bluetooth off; `.env` configured with `DEVICE_ID` + `AUTH_KEY`;
+first confirm the software path with `--demo`.
 
-| # | 验证项 | 命令 / 判据 |
+| # | Item | Command / criterion |
 |---|---|---|
-| 1 | 扫描到设备 | `scan_ble.py` 列表出现手环，地址/UUID 与 `DEVICE_ID` 一致 |
-| 2 | 连接 + 认证 | 日志出现 `Chunked ECDH authentication SUCCEEDED` |
-| 3 | 心率流 | 日志出现 `Current Heart Rate: N BPM`，`heart_rate.jsonl` 有数据 |
-| 4 | 步数流 | 日志出现 `Steps: ...`，`steps.jsonl` 有数据 |
-| 5 | IMU（可选） | `--imu` 时 `imu.jsonl` 约 25Hz 增长 |
-| 6 | 看板（可选） | `--web-port 8080`，浏览器曲线实时刷新，`/healthz` 返回 ok |
-| 7 | 历史同步（可选） | `--sync-history 1` 出现 `Band history sync finished`，`spo2.jsonl`/`activity_history.jsonl` 有数据 |
-| 8 | 主动断开重连 | 关闭手环蓝牙/走远再回来，日志出现 `Reconnecting in ...` 并恢复采集 |
-| 9 | 退出与落盘 | Ctrl+C 后 `Storage summary` 计数 > 0，`--export-csv` 生成 5 张 CSV |
+| 1 | Device is scanned | The band appears in the `scan_ble.py` list, and the address/UUID matches `DEVICE_ID` |
+| 2 | Connect + authenticate | Log shows `Chunked ECDH authentication SUCCEEDED` |
+| 3 | Heart-rate stream | Log shows `Current Heart Rate: N BPM`, and `heart_rate.jsonl` has data |
+| 4 | Step stream | Log shows `Steps: ...`, and `steps.jsonl` has data |
+| 5 | IMU (optional) | With `--imu`, `imu.jsonl` grows at about 25Hz |
+| 6 | Dashboard (optional) | `--web-port 8080`, browser curves refresh live, `/healthz` returns ok |
+| 7 | History sync (optional) | `--sync-history 1` shows `Band history sync finished`, `spo2.jsonl`/`activity_history.jsonl` have data |
+| 8 | Active disconnect and reconnect | Turn off the band's Bluetooth/go away and come back; the log shows `Reconnecting in ...` and collection resumes |
+| 9 | Exit and persistence | After Ctrl+C, `Storage summary` counts > 0; `--export-csv` generates 5 CSV files |
 
-建议把第 2、3、7 项作为核心通过标准；其余失败请记录现象与日志。
+We recommend treating items 2, 3 and 7 as the core pass criteria; for other failures, record the symptom and logs.
 
 ---
 
-## 7. 提交问题或验证结果时需要的信息
+## 7. Information to include in a bug report
 
-1. 操作系统与版本（如 Windows 11 23H2 / Ubuntu 24.04）；
-2. Python 版本、`python -m pip list | grep -i bleak`（Windows 用 `findstr`）；
-3. 蓝牙适配器型号（设备管理器 → 蓝牙）；
-4. 启动日志前几行（`ECDH backend`、`Discovery target`、`BLE link established ... MTU`）；
-5. `--log-level DEBUG` 的完整日志（**务必先脱敏 MAC 与 auth_key**）；
-6. 失败发生在清单第几步，是否能稳定复现。
+1. Operating system and version (e.g. Windows 11 23H2 / Ubuntu 24.04);
+2. Python version, `python -m pip list | grep -i bleak` (use `findstr` on Windows);
+3. Bluetooth adapter model (Device Manager → Bluetooth);
+4. The first few lines of the startup log (`ECDH backend`, `Discovery target`, `BLE link established ... MTU`);
+5. The complete `--log-level DEBUG` log (**always redact MACs and auth_key first**);
+6. Which checklist step the failure occurred at, and whether it reproduces reliably.
 
-> 日志脱敏：`sed -E 's/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/XX:XX:XX:XX:XX:XX/g'`。
-> 永远不要提交 `.env`、`data/`、抓包文件。
+> Log redaction: `sed -E 's/([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}/XX:XX:XX:XX:XX:XX/g'`.
+> Never submit `.env`, `data/` or capture files.

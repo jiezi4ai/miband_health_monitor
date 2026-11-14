@@ -15,6 +15,34 @@ __DASHBOARD_CSS__
 </header>
 
 <main>
+  <section id="workoutPanel" class="workout-panel hidden">
+    <div class="wk-header">
+      <div class="wk-title">
+        <span>🏃 运动保活实时面板</span>
+        <span id="wkState" class="wk-badge">--</span>
+      </div>
+      <div class="wk-meta">
+        <span>时长 <strong id="wkDuration">00:00:00</strong></span>
+        <span id="wkBatteryWrap" class="hidden">电量 <strong id="wkBattery">--</strong>%</span>
+        <span>重连 <strong id="wkReconnects">0</strong> 次</span>
+        <span id="wkGapFillWrap" class="hidden">缺口补齐 <strong id="wkGapFilled">0</strong> 分钟</span>
+      </div>
+    </div>
+    <div class="wk-cards">
+      <div class="wk-card"><div class="label">运动净步数</div>
+        <div class="value" id="wkSteps">--</div></div>
+      <div class="wk-card"><div class="label">运动净距离</div>
+        <div class="value"><span id="wkDist">--</span><span class="unit">m</span></div></div>
+      <div class="wk-card"><div class="label">心率估算消耗 / 手环净卡</div>
+        <div class="value"><span id="wkHrKcal">--</span><span class="unit">kcal</span></div>
+        <div class="wk-sub">手环 0x0007 净增量：<span id="wkBandKcal">--</span> kcal</div></div>
+      <div class="wk-card"><div class="label">心率均值 / 峰值 / 平滑</div>
+        <div class="value"><span id="wkAvgHr">--</span><span class="unit">/ <span id="wkMaxHr">--</span> BPM</span></div>
+        <div class="wk-sub">平滑 <span id="wkSmoothHr">--</span> BPM · <span id="wkZone">--</span></div></div>
+    </div>
+    <div id="wkZones" class="wk-zones"></div>
+  </section>
+
   <section class="cards">
     <div class="card"><div class="label">心率</div>
       <div class="value"><span id="hr">--</span><span class="unit">BPM</span></div></div>
@@ -47,6 +75,9 @@ __DASHBOARD_CSS__
   last update <span id="updated">--</span><span id="historyNote"></span>
 </footer>
 
+<script>
+__WORKOUT_SCRIPT__
+</script>
 <script>
 __DASHBOARD_SCRIPT__
 </script>

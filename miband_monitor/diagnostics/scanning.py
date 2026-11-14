@@ -57,7 +57,7 @@ async def scan_devices(duration_seconds: int = 90) -> None:
         print("No devices with 'Band/Mi/Xiaomi' in their advertised name were found.")
         print(
             "Tip: If the band is paired with your phone, disable phone Bluetooth and "
-            "make sure 'Discoverable' (公共广播) was left enabled by Zepp Life. The band "
+            "make sure 'Discoverable' (public advertising) was left enabled by Zepp Life. The band "
             "then advertises ONE pulse every 40-60 s and none while its screen is off; "
             "touching/sliding the screen does NOT make it advertise faster, so just wait."
         )

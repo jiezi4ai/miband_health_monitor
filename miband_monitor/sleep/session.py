@@ -134,7 +134,7 @@ def analyze(
     nights: dict[str, list[SleepSession]] = {}
     for session in sessions:
         # A night belongs to the date you went to sleep on -- that is how Zepp
-        # Life labels the page (a 22:06-05:55 session is "1 月 6 日", not 7).
+        # Life labels the page (a 22:06-05:55 session is "Jan 6", not 7).
         nights.setdefault(local_date(session.start, tz=tz), []).append(session)
 
     totals = {

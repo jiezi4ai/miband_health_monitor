@@ -50,6 +50,11 @@ UUID_CHAR_HR_MEASUREMENT = "00002a37-0000-1000-8000-00805f9b34fb"
 #: Standard Heart Rate Control Point characteristic (0x2A39).
 UUID_CHAR_HR_CONTROL = "00002a39-0000-1000-8000-00805f9b34fb"
 
+#: Standard Bluetooth SIG Battery Service (0x180F).
+UUID_SVC_BATTERY = "0000180f-0000-1000-8000-00805f9b34fb"
+#: Standard Battery Level characteristic (0x2A19, uint8 0..100%).
+UUID_CHAR_BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"
+
 #: Endpoint type announced in the first chunked-auth header (Huami auth).
 CHUNKED_ENDPOINT_AUTH = 0x82
 

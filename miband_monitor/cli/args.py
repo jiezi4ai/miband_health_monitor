@@ -12,12 +12,19 @@ from typing import Optional
 
 from ..ble.identity import _env_device_id
 from ..config.defaults import (
+    DEFAULT_BATTERY_POLL_SECONDS,
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_DATA_DIR,
     DEFAULT_HISTORY_DAYS,
+    DEFAULT_HR_SILENCE_HARD_SECONDS,
+    DEFAULT_HR_SILENCE_SOFT_SECONDS,
     DEFAULT_LOG_LEVEL,
     DEFAULT_SCAN_TIMEOUT,
     DEFAULT_WEB_HOST,
+    DEFAULT_WORKOUT_AGE,
+    DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS,
+    DEFAULT_WORKOUT_SEX,
+    DEFAULT_WORKOUT_WEIGHT_KG,
     ENV_AUTH_KEY,
     ENV_BAND_TZ,
     ENV_BLE_MTU,
@@ -193,6 +200,71 @@ def build_parser() -> argparse.ArgumentParser:
             "(Linux only; direct connect is the default when the band is paired)"
         ),
     )
+    parser.add_argument(
+        "--workout",
+        action="store_true",
+        help="enable workout mode (HR zones, net steps/kcal, gap-fill on reconnect, summary)",
+    )
+    parser.add_argument(
+        "--age",
+        type=int,
+        default=DEFAULT_WORKOUT_AGE,
+        help=f"user age in years for workout HRmax/kcal estimate (default: {DEFAULT_WORKOUT_AGE})",
+    )
+    parser.add_argument(
+        "--weight",
+        type=float,
+        default=DEFAULT_WORKOUT_WEIGHT_KG,
+        help=f"user weight in kg for workout kcal estimate (default: {DEFAULT_WORKOUT_WEIGHT_KG:g})",
+    )
+    parser.add_argument(
+        "--sex",
+        choices=("male", "female"),
+        default=DEFAULT_WORKOUT_SEX,
+        help=f"user sex for Keytel HR kcal estimation (default: {DEFAULT_WORKOUT_SEX})",
+    )
+    parser.add_argument(
+        "--hr-max",
+        type=int,
+        default=None,
+        help="explicit HRmax (BPM) for workout zones (default: 220 - age)",
+    )
+    parser.add_argument(
+        "--battery-interval",
+        type=float,
+        default=DEFAULT_BATTERY_POLL_SECONDS,
+        help=(
+            "best-effort Battery Service (0x2A19) poll interval in seconds during "
+            f"--workout (0 disables; default: {DEFAULT_BATTERY_POLL_SECONDS:g})"
+        ),
+    )
+    parser.add_argument(
+        "--gap-fill-min",
+        type=float,
+        default=DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS,
+        help=(
+            "minimum disconnect gap (seconds) to trigger incremental ACTIVITY history "
+            f"gap-fill on reconnect (default: {DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS:g})"
+        ),
+    )
+    parser.add_argument(
+        "--hr-silence-soft",
+        type=float,
+        default=DEFAULT_HR_SILENCE_SOFT_SECONDS,
+        help=(
+            "seconds of 0x2A37 HR notification silence before soft re-arm "
+            f"(0 disables; default: {DEFAULT_HR_SILENCE_SOFT_SECONDS:g})"
+        ),
+    )
+    parser.add_argument(
+        "--hr-silence-hard",
+        type=float,
+        default=DEFAULT_HR_SILENCE_HARD_SECONDS,
+        help=(
+            "seconds of 0x2A37 HR notification silence before forced reconnect "
+            f"(0 disables; default: {DEFAULT_HR_SILENCE_HARD_SECONDS:g})"
+        ),
+    )
     return parser
 
 
@@ -204,6 +276,14 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.sync_sleep_spo2 and args.sync_history is None:
         parser.error("--sync-sleep-spo2 requires --sync-history [DAYS]")
+    if args.age <= 0:
+        parser.error("--age must be positive")
+    if args.weight <= 0:
+        parser.error("--weight must be positive")
+    if args.battery_interval < 0 or args.gap_fill_min < 0:
+        parser.error("--battery-interval and --gap-fill-min must be non-negative")
+    if args.hr_silence_soft < 0 or args.hr_silence_hard < 0:
+        parser.error("--hr-silence-soft and --hr-silence-hard must be non-negative")
     if args.storage not in STORAGE_BACKENDS:
         args.storage = "both"
     return args

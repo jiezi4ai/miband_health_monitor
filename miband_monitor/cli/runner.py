@@ -13,16 +13,26 @@ import time
 from typing import Callable, Optional
 
 from ..ble.client import MiBand6Client, StreamCallbacks
-from ..ble.identity import normalize_auth_key
 from ..bluez.errors import describe_ble_error
 from ..config.defaults import (
+    DEFAULT_BATTERY_POLL_SECONDS,
     DEFAULT_CONNECT_TIMEOUT,
+    DEFAULT_HR_SILENCE_HARD_SECONDS,
+    DEFAULT_HR_SILENCE_SOFT_SECONDS,
     DEFAULT_RECONNECT_FAST_DELAY,
     DEFAULT_RECONNECT_INITIAL_DELAY,
     DEFAULT_RECONNECT_MAX_DELAY,
     DEFAULT_SCAN_TIMEOUT,
 )
+from ..dashboard import TelemetryHub
 from ..history.sync import summarize_history_result, sync_history
+from ..workout import WorkoutSession
+from .workout_runner import (
+    handle_workout_connected,
+    handle_workout_disconnected,
+    handle_workout_finish,
+    wait_session_with_battery,
+)
 
 logger = logging.getLogger("MiBand6Client")
 
@@ -79,6 +89,12 @@ async def run_monitor(
     device_name: Optional[str] = None,
     mtu: Optional[int] = None,
     direct_connect: bool = True,
+    hr_silence_soft: float = DEFAULT_HR_SILENCE_SOFT_SECONDS,
+    hr_silence_hard: float = DEFAULT_HR_SILENCE_HARD_SECONDS,
+    workout: Optional[WorkoutSession] = None,
+    hub: Optional[TelemetryHub] = None,
+    battery_interval: float = DEFAULT_BATTERY_POLL_SECONDS,
+    workout_reconcile: bool = True,
     client_factory: Optional[Callable[[str, str], MiBand6Client]] = None,
 ) -> None:
     """Connect + stream until duration elapses, reconnecting with backoff."""
@@ -92,6 +108,8 @@ async def run_monitor(
             scan_timeout=scan_timeout,
             connect_timeout=connect_timeout,
             direct_connect=direct_connect,
+            hr_silence_soft_seconds=hr_silence_soft,
+            hr_silence_hard_seconds=hr_silence_hard,
         )
     )
     pre_auth_deadline = None if duration is None else time.monotonic() + duration
@@ -147,6 +165,14 @@ async def run_monitor(
                     band_tz=band_tz,
                 )
                 history_synced = True
+            await handle_workout_connected(
+                client,
+                workout,
+                callbacks,
+                attempt=attempt,
+                band_tz=band_tz,
+                hub=hub,
+            )
             # Order matters on real hardware: the raw sensor hub stream must be
             # activated before the heart-rate stream. Starting it afterwards
             # silently starves the standard BLE heart-rate characteristic
@@ -167,21 +193,26 @@ async def run_monitor(
                 if collection_deadline is None
                 else collection_deadline - time.monotonic()
             )
-            if remaining is None:
-                await client.wait_until_disconnected()
-                failure = RuntimeError("BLE link lost")
-            elif remaining <= 0:
+            outcome = await wait_session_with_battery(
+                client,
+                remaining,
+                workout,
+                battery_interval=battery_interval,
+                hub=hub,
+                wait_for_fn=asyncio.wait_for,
+            )
+            if outcome == "timeout":
                 logger.info("Collection window (%ss) elapsed.", duration)
+                await handle_workout_finish(
+                    client,
+                    workout,
+                    callbacks,
+                    band_tz=band_tz,
+                    hub=hub,
+                    reconcile=workout_reconcile,
+                )
                 return
-            else:
-                try:
-                    await asyncio.wait_for(
-                        client.wait_until_disconnected(), timeout=remaining
-                    )
-                    failure = RuntimeError("BLE link lost")
-                except asyncio.TimeoutError:
-                    logger.info("Collection window (%ss) elapsed.", duration)
-                    return
+            failure = RuntimeError("BLE link lost")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -189,7 +220,9 @@ async def run_monitor(
             last_failure = exc
             logger.error("Session %d failed: %s", attempt, describe_ble_error(exc))
         finally:
-            if not was_authenticated:
+            if was_authenticated and failure is not None:
+                handle_workout_disconnected(workout, hub=hub)
+            elif not was_authenticated:
                 if getattr(client, "_stale_bond_reset_attempted", False):
                     stale_bond_reset_done = True
                     unresolved_drop_streak = 0
@@ -228,50 +261,4 @@ async def run_monitor(
             await asyncio.sleep(delay)
 
 
-async def run_demo(
-    device_id: str,
-    auth_key_hex: str,
-    *,
-    duration: Optional[int] = None,
-    imu: bool = False,
-    callbacks: Optional[StreamCallbacks] = None,
-    sync_history_days: Optional[int] = None,
-    sync_sleep_spo2: bool = False,
-    band_tz: Optional[str] = None,
-    mtu: Optional[int] = None,
-) -> None:
-    """Run the full client stack against the in-memory simulator (no hardware)."""
-    from ..simulator import FakeBleakScanner, SimulatedBand, simulated_factories
-
-    band = SimulatedBand(auth_key=normalize_auth_key(auth_key_hex))
-    sim_client_factory, _scanner_factory = simulated_factories(band)
-
-    class _DemoScanner(FakeBleakScanner):
-        default_address = device_id
-
-    def _factory(mac: str, key: str) -> MiBand6Client:
-        return MiBand6Client(
-            mac,
-            key,
-            mtu=mtu,
-            client_factory=sim_client_factory,
-            scanner_factory=_DemoScanner,
-        )
-
-    logger.info("DEMO MODE: using an in-memory simulated Mi Band 6 (no Bluetooth needed).")
-    await run_monitor(
-        device_id,
-        auth_key_hex,
-        duration=duration,
-        imu=imu,
-        callbacks=callbacks,
-        scan_timeout=10.0,
-        reconnect=True,
-        reconnect_initial_delay=0.2,
-        reconnect_max_delay=1.0,
-        sync_history_days=sync_history_days,
-        sync_sleep_spo2=sync_sleep_spo2,
-        band_tz=band_tz,
-        mtu=mtu,
-        client_factory=_factory,
-    )
+from .demo_runner import run_demo  # noqa: E402,F401  (public re-export)

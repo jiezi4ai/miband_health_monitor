@@ -1,114 +1,116 @@
-# 配置
+**English** · [简体中文](configuration.zh-CN.md)
 
-配置来源优先级：**命令行参数 > 进程环境变量 > `.env` > 内建默认值**。
-默认值集中在 `miband_monitor/config/defaults.py`，`.env` 模板见
-[.env.example](../../.env.example)。
+# Configuration
 
-## 1. 准备 .env
+Configuration source priority: **command-line arguments > process environment variables > `.env` > built-in defaults**.
+Defaults are centralized in `miband_monitor/config/defaults.py`; the `.env` template is
+[.env.example](../../.env.example).
+
+## 1. Prepare .env
 
 ```bash
 cp .env.example .env
 ```
 
-`.env` 已被 `.gitignore` 忽略；程序在启动时会尝试把它收紧到 0600。
-**不要提交真实 auth_key**。
+`.env` is ignored by `.gitignore`; on startup the program tries to tighten it to 0600.
+**Do not commit a real auth_key.**
 
-## 2. 变量表
+## 2. Variable table
 
-| 变量 | 必填 | 默认 | 说明 |
+| Variable | Required | Default | Description |
 |---|---|---|---|
-| `DEVICE_ID` | 是 | — | 手环标识：Linux/Windows 用 MAC（如 `C0:FF:EE:C0:FF:EE`）；macOS 用 CoreBluetooth UUID |
-| `DEVICE_MAC` | 否 | — | 旧版别名，仍兼容；同时配置时 `DEVICE_ID` 优先（占位符会被忽略） |
-| `DEVICE_NAME` | 否 | — | 广播名子串匹配（大小写不敏感），如 `Mi Smart Band`；macOS/多设备时实用 |
-| `AUTH_KEY` | 是 | — | 32 位十六进制认证密钥（16 字节） |
-| `BLE_MTU` | 否 | 自动 | 手动覆盖 ATT MTU（23–517）；一般留空，自动探测 |
-| `OUTPUT_DIR` | 否 | `data` | JSONL 与 `mi_band.db` 输出目录 |
-| `STORAGE_BACKEND` | 否 | `both` | `jsonl` / `sqlite` / `both` / `none` |
-| `SCAN_TIMEOUT` | 否 | `90` | 等待广播的秒数；无手机链路的手环每 40–60 秒才发一个脉冲，建议 ≥120 |
-| `CONNECT_TIMEOUT` | 否 | `75` | 单次连接预算；Linux 上会被抬到至少 70 秒（覆盖一个广播周期） |
-| `LOG_LEVEL` | 否 | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
-| `DEMO_MODE` | 否 | `0` | 设为 `1` 等价于 `--demo` |
-| `WEB_PORT` | 否 | — | 实时看板端口；留空关闭，`0` 表示随机空闲端口 |
-| `WEB_HOST` | 否 | `127.0.0.1` | 看板绑定地址；默认仅本机可访问 |
-| `HISTORY_DAYS` | 否 | — | 设为 N 等价于 `--sync-history N` |
-| `MIBAND_ECDH_BACKEND` | 否 | `auto` | 诊断用：`auto` / `native` / `python` |
-| `MIBAND_ECDH_LIB` | 否 | — | 显式指定原生 ECDH 库路径 |
-| `MIBAND_BLUEZ_TRUST` | 否 | `1` | Linux：连接前把设备设为 `Trusted`；`0` 仅用于 A/B 实验 |
-| `MIBAND_BLUEZ_DUPLICATE_DATA` | 否 | `0` | Linux：`1` 恢复 `DuplicateData=True`（BT 5/6 上易扫死适配器） |
-| `MIBAND_SMP_SETTLE_DELAY` | 否 | `1.5` | Linux：`ServicesResolved` 后等待 SMP/profile 结算的秒数 |
-| `MIBAND_BLUEZ_AGENT` | 否 | `0` | Linux：`1` 注册进程内 `NoInputNoOutput` 配对 agent |
+| `DEVICE_ID` | Yes | — | Band identifier: on Linux/Windows use the MAC (e.g. `C0:FF:EE:C0:FF:EE`); on macOS use the CoreBluetooth UUID |
+| `DEVICE_MAC` | No | — | Legacy alias, still supported; when both are set, `DEVICE_ID` takes priority (placeholder values are ignored) |
+| `DEVICE_NAME` | No | — | Advertising-name substring match (case-insensitive), e.g. `Mi Smart Band`; useful on macOS/with multiple devices |
+| `AUTH_KEY` | Yes | — | 32-character hexadecimal authentication key (16 bytes) |
+| `BLE_MTU` | No | auto | Manually override the ATT MTU (23–517); usually leave empty for auto-detection |
+| `OUTPUT_DIR` | No | `data` | Output directory for JSONL and `mi_band.db` |
+| `STORAGE_BACKEND` | No | `both` | `jsonl` / `sqlite` / `both` / `none` |
+| `SCAN_TIMEOUT` | No | `90` | Seconds to wait for advertising; a band with no phone link only emits a pulse every 40–60 seconds, so ≥120 is recommended |
+| `CONNECT_TIMEOUT` | No | `75` | Single-connection budget; on Linux it is raised to at least 70 seconds (covering one advertising cycle) |
+| `LOG_LEVEL` | No | `INFO` | `DEBUG` / `INFO` / `WARNING` / `ERROR` |
+| `DEMO_MODE` | No | `0` | Set to `1` to be equivalent to `--demo` |
+| `WEB_PORT` | No | — | Live dashboard port; leave empty to disable, `0` means a random free port |
+| `WEB_HOST` | No | `127.0.0.1` | Dashboard bind address; by default only reachable from the local machine |
+| `HISTORY_DAYS` | No | — | Set to N to be equivalent to `--sync-history N` |
+| `MIBAND_ECDH_BACKEND` | No | `auto` | Diagnostic use: `auto` / `native` / `python` |
+| `MIBAND_ECDH_LIB` | No | — | Explicit path to the native ECDH library |
+| `MIBAND_BLUEZ_TRUST` | No | `1` | Linux: mark the device as `Trusted` before connecting; `0` only for A/B experiments |
+| `MIBAND_BLUEZ_DUPLICATE_DATA` | No | `0` | Linux: `1` restores `DuplicateData=True` (on BT 5/6 this easily wedges the adapter's scanning) |
+| `MIBAND_SMP_SETTLE_DELAY` | No | `1.5` | Linux: seconds to wait after `ServicesResolved` for SMP/profile settlement |
+| `MIBAND_BLUEZ_AGENT` | No | `0` | Linux: `1` registers an in-process `NoInputNoOutput` pairing agent |
 
-## 3. 获取 auth_key
+## 3. Obtain auth_key
 
-三选一：
+Choose one of three:
 
-1. **小米账号**（交互式，密码不落盘）：
-
-   ```bash
-   .venv/bin/python get_auth_key.py     # 选择 1
-   ```
-
-2. **Zepp/Amazfit 账号**：
+1. **Xiaomi account** (interactive, password is never written to disk):
 
    ```bash
-   .venv/bin/python get_auth_key.py     # 选择 2
+   .venv/bin/python get_auth_key.py     # choose 1
    ```
 
-3. **浏览器 app_token**（已有网页登录态）：
+2. **Zepp/Amazfit account**:
 
    ```bash
-   .venv/bin/python fetch_by_token.py   # 输入 user_id 和 app_token
+   .venv/bin/python get_auth_key.py     # choose 2
    ```
 
-已有第三方 `huami-token` 输出时，直接填入 `.env` 亦可。
-`AUTH_KEY` 等价于手环配对凭据，请视同密码保管；详见 [privacy.md](privacy.md)。
+3. **Browser app_token** (existing web login session):
 
-## 4. 命令行参数
+   ```bash
+   .venv/bin/python fetch_by_token.py   # enter user_id and app_token
+   ```
+
+If you already have output from the third-party `huami-token`, you can fill it into `.env` directly.
+`AUTH_KEY` is equivalent to the band's pairing credential; treat it like a password; see [privacy.md](privacy.md) for details.
+
+## 4. Command-line arguments
 
 ```
-python miband_client.py [duration] [选项]
+python miband_client.py [duration] [options]
 
-duration              采集秒数；省略则一直运行到 Ctrl+C
---imu                 同时采集原始 IMU 加速度（约 25Hz；会先于心率流启动）
---sync-history [DAYS] 连接后拉取最近 DAYS 天手环历史（默认 7；实验性）
---sync-sleep-spo2     额外拉取 0x26 整夜血氧（需配合 --sync-history）
---demo                使用内存模拟手环（无需蓝牙硬件）
---device-id ID        覆盖 DEVICE_ID（MAC；macOS 为 UUID）
---device-name NAME    广播名子串匹配（额外发现条件）
---mtu BYTES           手动覆盖 ATT MTU（23–517；默认自动探测）
---web-port PORT       启动实时看板/HTTP API（0 = 随机空闲端口）
---web-host HOST       看板绑定地址（默认 127.0.0.1）
---output DIR          输出目录（默认 $OUTPUT_DIR 或 data）
---storage MODE        jsonl | sqlite | both | none（默认 both）
---export-csv          会话结束后把 SQLite 导出为 CSV
---scan-timeout SEC    扫描等待秒数（默认 90）
---connect-timeout SEC 单次连接预算（默认 75）
+duration              collection seconds; if omitted, run until Ctrl+C
+--imu                 also collect raw IMU acceleration (about 25Hz; starts before the heart-rate stream)
+--sync-history [DAYS] after connecting, fetch the band history for the last DAYS days (default 7; experimental)
+--sync-sleep-spo2     additionally fetch 0x26 overnight SpO2 (requires --sync-history)
+--demo                use an in-memory simulated band (no Bluetooth hardware needed)
+--device-id ID        override DEVICE_ID (MAC; UUID on macOS)
+--device-name NAME    advertising-name substring match (additional discovery condition)
+--mtu BYTES           manually override the ATT MTU (23–517; auto-detected by default)
+--web-port PORT       start the live dashboard/HTTP API (0 = random free port)
+--web-host HOST       dashboard bind address (default 127.0.0.1)
+--output DIR          output directory (default $OUTPUT_DIR or data)
+--storage MODE        jsonl | sqlite | both | none (default both)
+--export-csv          export SQLite to CSV after the session ends
+--scan-timeout SEC    scan wait seconds (default 90)
+--connect-timeout SEC single-connection budget (default 75)
 --log-level LEVEL     DEBUG | INFO | WARNING | ERROR
---no-reconnect        出错/断连后不自动重连
---doctor              只做环境自检，不连接手环
---no-direct-connect   Linux：强制走扫描路径（排查直连缓存问题）
+--no-reconnect        do not automatically reconnect after errors/disconnects
+--doctor              run environment self-checks only, do not connect to the band
+--no-direct-connect   Linux: force the scan path (to debug stale direct-connect issues)
 ```
 
-## 5. 常用组合
+## 5. Common combinations
 
 ```bash
-# 无硬件演示（含历史同步/睡眠血氧/CSV）
+# Hardware-free demo (including history sync/sleep SpO2/CSV)
 python miband_client.py --demo 2 --imu --sync-history 1 --sync-sleep-spo2 \
     --output data/demo --export-csv
 
-# 长时间采集 + 看板 + 结束后导出
+# Long collection + dashboard + export afterwards
 python miband_client.py --web-port 8080 --export-csv
 
-# 只同步历史，不落实时流
+# Sync history only, no live streams
 python miband_client.py 1 --sync-history 3 --storage both
 
-# 研究 ECDH 原生后端问题
+# Investigate native ECDH backend issues
 MIBAND_ECDH_BACKEND=native python miband_client.py --doctor
 ```
 
-## 6. 校验与故障
+## 6. Validation and troubleshooting
 
-- 启动日志前两行会打印 `ECDH backend` 与 `Discovery target`，反馈问题时请一并附上；
-- 配置错误通常被明确捕获：未配置设备/密钥、`--mtu` 越界、`--sync-sleep-spo2` 缺前置参数；
-- 权限/环境问题先跑 `--doctor`；
-- 平台专项说明见 [cross-platform.md](cross-platform.md)，报错速查见 [faq.md](faq.md)。
+- The first two lines of the startup log print `ECDH backend` and `Discovery target`; please include them when reporting a problem;
+- Configuration errors are usually caught explicitly: unconfigured device/key, `--mtu` out of range, `--sync-sleep-spo2` missing its prerequisite argument;
+- For permission/environment issues, run `--doctor` first;
+- See [cross-platform.md](cross-platform.md) for platform-specific notes and [faq.md](faq.md) for an error lookup.

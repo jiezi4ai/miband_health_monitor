@@ -1,78 +1,80 @@
-# diagnostics — 环境自检与扫描排障
+**English** · [简体中文](diagnostics.zh-CN.md)
 
-## 职责
+# diagnostics — Environment self-check and scan troubleshooting
 
-把"为什么连不上"从日志猜测变成可复制的检查步骤：
+## Responsibilities
 
-- `miband_client.py --doctor`：只读检查配置、ECDH 后端、输出目录、以及（Linux）BlueZ
-  适配器/设备状态；不连接手环、不修改系统设置；失败时打印可复制的修复命令。
-- `scan_ble.py`：一次性扫描并按"手环/其它设备"分类列出地址与 RSSI。
-- `scan_live.py`：连续扫描并逐包打印，用于抓 40–60 s 才出现一次的孤立广播脉冲。
+Turn "why can't it connect" from log guesswork into copyable check steps:
 
-源码：[miband_monitor/diagnostics/](../../miband_monitor/diagnostics/)
+- `miband_client.py --doctor`: read-only check of the configuration, ECDH backend, output directory and (on Linux) the BlueZ
+  adapter/device state; does not connect to the band or modify system settings; on failure prints copyable repair commands.
+- `scan_ble.py`: one-shot scan listing addresses and RSSI grouped as "band / other devices".
+- `scan_live.py`: continuous scanning that prints every packet, used to catch the isolated advertising pulse that only appears every 40–60 s.
 
-## 模块拆分
+Source: [miband_monitor/diagnostics/](../../miband_monitor/diagnostics/)
 
-| 文件 | 内容 |
+## Module breakdown
+
+| File | Contents |
 |---|---|
-| `report.py` | `_Report`、`OK/INFO/WARN/FAIL` 级别与统一输出格式 |
-| `checks.py` | 单检查项：`.env` 权限、依赖版本、ECDH 后端、输出目录可写、设备标识格式 |
-| `doctor.py` | `run_doctor(device_id, auth_key, output)` 编排，返回 0/1 |
-| `scanning.py` | `scan_devices()`（`scan_ble.py` 的实现） |
-| `live_scan.py` | 连续扫描主循环（`scan_live.py` 的实现），Linux 复用 `bluez.scanner_kwargs()` |
+| `report.py` | `_Report`, `OK/INFO/WARN/FAIL` levels and the unified output format |
+| `checks.py` | Individual checks: `.env` permissions, dependency versions, ECDH backend, output directory writability, device identifier format |
+| `doctor.py` | `run_doctor(device_id, auth_key, output)` orchestration, returns 0/1 |
+| `scanning.py` | `scan_devices()` (the implementation of `scan_ble.py`) |
+| `live_scan.py` | Continuous scan main loop (the implementation of `scan_live.py`), reuses `bluez.scanner_kwargs()` on Linux |
 
-## 公开 API
+## Public API
 
-| 名称 | 说明 |
+| Name | Description |
 |---|---|
-| `run_doctor(device_id, auth_key, output) -> int` | 异步自检；0 = 全部通过，1 = 有 FAIL |
-| `_Report` | 收集检查结果并格式化输出（供测试断言） |
-| `scan_devices(duration_seconds=90)` | bleak 扫描，区分手环与其它 BLE 设备 |
-| `main()`（live scan） | 连续打印 `[FOUND] address | name | rssi` |
+| `run_doctor(device_id, auth_key, output) -> int` | Async self-check; 0 = all passed, 1 = some FAIL |
+| `_Report` | Collects check results and formats output (for test assertions) |
+| `scan_devices(duration_seconds=90)` | bleak scan, distinguishes the band from other BLE devices |
+| `main()` (live scan) | Continuously prints `[FOUND] address | name | rssi` |
 
-## 数据流
+## Data flow
 
 ```
 cli.args --doctor ──> cli.app.main ──> diagnostics.doctor.run_doctor
-                                         ├─ config.env / config.privacy（脱敏）
+                                         ├─ config.env / config.privacy (redaction)
                                          ├─ crypto.facade.backend_name()
-                                         ├─ storage.secure_path / 输出目录探测
+                                         ├─ storage.secure_path / output directory probe
                                          └─ bluez.list_adapters()/find_device()
 scan_ble.py / scan_live.py ──> diagnostics.scanning / live_scan ──> bleak
 ```
 
-## 依赖
+## Dependencies
 
-- `miband_monitor.config`、`crypto`、`bluez`；扫描脚本还依赖 `bleak`。
-- 不依赖 `ble.client`，因此自检不需要认证代码路径。
+- `miband_monitor.config`, `crypto`, `bluez`; the scan scripts also depend on `bleak`.
+- Does not depend on `ble.client`, so the self-check does not need the authentication code path.
 
-## 配置与常量
+## Configuration and constants
 
-- 扫描默认 90 s（`SCAN_TIMEOUT`）；手环无手机链路时每 40–60 s 才发一个脉冲，
-  短窗口几乎必然扫不到；
-- `--doctor` 使用 `--output`、`DEVICE_ID`/`DEVICE_MAC`、`AUTH_KEY`（只检查格式，不打印明文）；
-- Linux 检查 trusted/paired/connected、适配器 powered，以及 `.env` 实际权限。
+- Scanning defaults to 90 s (`SCAN_TIMEOUT`); without a phone link the band only emits a pulse every 40–60 s,
+  so a short window will almost certainly miss it;
+- `--doctor` uses `--output`, `DEVICE_ID`/`DEVICE_MAC`, `AUTH_KEY` (format checked only, never printed in plaintext);
+- On Linux it checks trusted/paired/connected, adapter powered, and the actual `.env` permissions.
 
-## 失败模式
+## Failure modes
 
-| 情况 | 输出/行为 |
+| Situation | Output/behavior |
 |---|---|
-| 未配置设备标识或密钥 | `[FAIL]` + 指向 `.env.example` 的提示，退出码 1 |
-| `.env` 权限过宽 | `[WARN]`（或 FAIL，取决于平台）并给出 `chmod 600` 命令 |
-| 适配器未上电/无适配器 | `[FAIL]`，提示启动 `bluetooth` 服务 |
-| 设备未 trust/pair | `[WARN]`，附 `bluetoothctl trust/pair` 命令 |
-| 输出目录不可写 | `[FAIL]`，提示换 `--output` |
-| 非 Linux 平台 | 跳过 BlueZ 检查，其余照常 |
-| 扫描 90 s 无结果 | 打印"手环可能未广播"与手机蓝牙/脉冲周期提示，退出码非 0 |
+| Device identifier or key not configured | `[FAIL]` + hint pointing at `.env.example`, exit code 1 |
+| `.env` permissions too open | `[WARN]` (or FAIL, depending on platform) and a `chmod 600` command |
+| Adapter not powered/no adapter | `[FAIL]`, hint to start the `bluetooth` service |
+| Device not trusted/paired | `[WARN]`, with `bluetoothctl trust/pair` commands |
+| Output directory not writable | `[FAIL]`, hint to change `--output` |
+| Non-Linux platform | BlueZ checks skipped, everything else proceeds as usual |
+| Scan finds nothing in 90 s | Prints "the band may not be advertising" plus phone Bluetooth/pulse-period hints, non-zero exit code |
 
-## 测试
+## Tests
 
-- `tests/test_bluez_support.py::test_doctor_*`（重构后 `tests/bluez/test_doctor.py`）：
-  报告级别、脱敏、输出目录失败、BlueZ 检查的 mock。
-- `tests/test_probe_declared.py` 覆盖 `tools/` 探针的参数与安全行为（不发 ACK）。
-- 真机排障记录：[validation/linux-validation.md](../validation/linux-validation.md)（L1–L10、P0 复验）。
+- `tests/test_bluez_support.py::test_doctor_*` (after the refactor `tests/bluez/test_doctor.py`):
+  report levels, redaction, output-directory failure, mocks of the BlueZ checks.
+- `tests/test_probe_declared.py` covers the arguments and safety behavior of the `tools/` probes (no ACK sent).
+- Hardware troubleshooting record: [validation/linux-validation.md](../validation/linux-validation.md) (L1–L10, P0 re-verification).
 
-## 相关文档
+## Related documentation
 
 - [guides/faq.md](../guides/faq.md)
 - [guides/cross-platform.md](../guides/cross-platform.md)

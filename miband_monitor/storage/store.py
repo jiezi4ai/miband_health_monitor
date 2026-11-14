@@ -141,7 +141,7 @@ class TelemetryStore:
         """Persist one per-minute historical activity sample fetched from the band."""
         self._enqueue(
             "activity_history",
-            timestamp,
+            timestamp if timestamp is not None else sample.get("ts"),
             {
                 "kind": int(sample.get("kind", 0)),
                 "intensity": int(sample.get("intensity", 0)),

@@ -25,6 +25,7 @@ See docs/modules/ble.md for responsibilities, public API and testing notes.
 from __future__ import annotations
 
 from ..config.defaults import DEFAULT_CONNECT_TIMEOUT
+from .battery import parse_battery_level
 from .chunked import (
     _resolve_mtu,
     _write_with_in_progress_retry,
@@ -76,6 +77,8 @@ from .protocol import (
     UUID_CHAR_RAW_SENSOR_CONTROL,
     UUID_CHAR_RAW_SENSOR_DATA,
     UUID_CHAR_STEPS,
+    UUID_CHAR_BATTERY_LEVEL,
+    UUID_SVC_BATTERY,
     UUID_SVC_HEART_RATE,
     UUID_SVC_MIBAND1,
 )
@@ -96,6 +99,8 @@ __all__ = [
     "UUID_SVC_HEART_RATE",
     "UUID_CHAR_HR_MEASUREMENT",
     "UUID_CHAR_HR_CONTROL",
+    "UUID_SVC_BATTERY",
+    "UUID_CHAR_BATTERY_LEVEL",
     # Chunked-transfer framing
     "CHUNKED_ENDPOINT_AUTH",
     "CHUNKED_DEFAULT_MTU",
@@ -125,6 +130,7 @@ __all__ = [
     "DEMO_DEFAULT_MAC",
     "DEMO_DEFAULT_AUTH_KEY",
     # Parsers
+    "parse_battery_level",
     "parse_heart_rate",
     "parse_realtime_steps",
     "parse_raw_sensor_data",

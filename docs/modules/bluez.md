@@ -1,103 +1,107 @@
-# bluez — Linux / BlueZ 兼容层
+**English** · [简体中文](bluez.zh-CN.md)
 
-## 职责
+# bluez — Linux / BlueZ compatibility layer
 
-Linux 下 BlueZ 与 WinRT/CoreBluetooth 有三处关键差异，本模块把差异封装成可测试的助手：
+## Responsibilities
 
-1. **D-Bus 设备对象是临时的**：未配对/未信任的设备断链后会从对象树消失，后续 GATT 写报
-   `UnknownObject: Method "WriteValue" ... doesn't exist`；未绑定的手环还会在约 40 s 后断链。
-2. **bleak 传 MAC 连接前会重新扫描**：已配对设备可直接通过 BlueZ 缓存对象连接，无需等广播。
-3. **ATT MTU 不会自动获取**：不调用 `_acquire_mtu()` 时 `mtu_size` 恒为 23。
+Under Linux, BlueZ differs from WinRT/CoreBluetooth in three key ways; this module wraps those differences into testable helpers:
 
-所有助手在非 BlueZ 平台优雅降级为空操作，因此 Windows/macOS 也能安全 import。
+1. **D-Bus device objects are transient**: an unpaired/untrusted device disappears from the object tree after disconnect,
+   and subsequent GATT writes fail with `UnknownObject: Method "WriteValue" ... doesn't exist`; an unbound band also
+   disconnects after about 40 s.
+2. **bleak rescans before connecting with a MAC**: a paired device can be connected directly through the BlueZ cached
+   object without waiting for an advertisement.
+3. **The ATT MTU is not acquired automatically**: without calling `_acquire_mtu()`, `mtu_size` is always 23.
 
-源码：[miband_monitor/bluez/](../../miband_monitor/bluez/)
+All helpers degrade gracefully to no-ops on non-BlueZ platforms, so Windows/macOS can safely import them.
 
-## 模块拆分
+Source: [miband_monitor/bluez/](../../miband_monitor/bluez/)
 
-| 文件 | 内容 |
+## Module breakdown
+
+| File | Contents |
 |---|---|
-| `constants.py` | 服务/接口/对象路径、默认 adapter、SMP 结算与超时 |
-| `platform.py` | `is_bluez_platform`、地址规范化 / MAC 判定 |
-| `dbus.py` | `_managed_objects` 与 D-Bus 基础调用 |
-| `devices.py` | `list_known_devices`、`find_device`、`make_ble_device`、`connected_device`、`paired_device`、`active_cached_device` |
-| `admin.py` | `set_adapter_pairable`、`set_device_trusted`、`disconnect_device`、`remove_device` |
-| `link.py` | `link_standby_budget`、`wait_for_bluez_link`（待命 Connect 循环） |
-| `pairing.py` | `BlueZPairingAgent`（`NoInputNoOutput` 进程内 agent） |
+| `constants.py` | Service/interface/object paths, default adapter, SMP settlement and timeouts |
+| `platform.py` | `is_bluez_platform`, address normalization / MAC detection |
+| `dbus.py` | `_managed_objects` and basic D-Bus calls |
+| `devices.py` | `list_known_devices`, `find_device`, `make_ble_device`, `connected_device`, `paired_device`, `active_cached_device` |
+| `admin.py` | `set_adapter_pairable`, `set_device_trusted`, `disconnect_device`, `remove_device` |
+| `link.py` | `link_standby_budget`, `wait_for_bluez_link` (standby Connect loop) |
+| `pairing.py` | `BlueZPairingAgent` (`NoInputNoOutput` in-process agent) |
 | `mtu.py` | `try_acquire_mtu` |
-| `scanner.py` | `scanner_kwargs`（`DuplicateData=False` 等） |
-| `errors.py` | 瞬时错误判定（`le-connection-abort-by-local`、`InProgress`）与 `describe_ble_error` |
+| `scanner.py` | `scanner_kwargs` (`DuplicateData=False` etc.) |
+| `errors.py` | Transient-error detection (`le-connection-abort-by-local`, `InProgress`) and `describe_ble_error` |
 
-## 公开 API
+## Public API
 
-`link_standby_budget(connect_timeout)`、`is_bluez_platform()`、`normalize_address()`、
-`looks_like_mac()`、`device_path_for_address()`、`list_known_devices()`、
-`find_device(address)`、`list_adapters()`、`make_ble_device(info)`、
-`connected_device(address)`、`paired_device(address)`、`active_cached_device(...)`、
-`is_transient_connect_error()`、`is_in_progress_error()`、`scanner_kwargs()`、
-`set_adapter_pairable()`、`set_device_trusted()`、`disconnect_device()`、`remove_device()`、
-`wait_for_bluez_link()`、`BlueZPairingAgent`、`try_acquire_mtu(client)`、
-`describe_ble_error(exc)`。
+`link_standby_budget(connect_timeout)`, `is_bluez_platform()`, `normalize_address()`,
+`looks_like_mac()`, `device_path_for_address()`, `list_known_devices()`,
+`find_device(address)`, `list_adapters()`, `make_ble_device(info)`,
+`connected_device(address)`, `paired_device(address)`, `active_cached_device(...)`,
+`is_transient_connect_error()`, `is_in_progress_error()`, `scanner_kwargs()`,
+`set_adapter_pairable()`, `set_device_trusted()`, `disconnect_device()`, `remove_device()`,
+`wait_for_bluez_link()`, `BlueZPairingAgent`, `try_acquire_mtu(client)`,
+`describe_ble_error(exc)`.
 
-## 数据流
+## Data flow
 
 ```
 ble.discovery
   ├─ paired/cached? ──paired_device()/active_cached_device()──> make_ble_device()
   │                                      │
-  └─ 否 ── scanner_kwargs() + bleak 扫描 ─┘
+  └─ no ── scanner_kwargs() + bleak scan ─┘
                                           v
-                              wait_for_bluez_link() 待命 Device1.Connect
-                                          │ 成功
+                              wait_for_bluez_link() standby Device1.Connect
+                                          │ success
                                           v
-                              try_acquire_mtu() ──> MTU 247（实测）
+                              try_acquire_mtu() ──> MTU 247 (measured)
 ```
 
-配对：`MIBAND_BLUEZ_AGENT=1` 时由 `BlueZPairingAgent` 在系统 D-Bus 注册
-`org.bluez.Agent1`，自动接受目标手环的 SMP 请求；否则由用户 `bluetoothctl pair`。
+Pairing: when `MIBAND_BLUEZ_AGENT=1`, `BlueZPairingAgent` registers `org.bluez.Agent1` on the system D-Bus and
+automatically accepts SMP requests from the target band; otherwise the user runs `bluetoothctl pair`.
 
-## 依赖
+## Dependencies
 
-- 运行时：Linux + BlueZ + `dbus-fast`（随 `bleak` 安装）；非 Linux 全部降级。
-- 项目内：只依赖 `miband_monitor.config`，不导入 `ble`（避免循环）。
-- `ble` 通过公共函数导入本包；`diagnostics` 用 `list_adapters/find_device` 做自检。
+- Runtime: Linux + BlueZ + `dbus-fast` (installed with `bleak`); everything degrades on non-Linux.
+- In-project: depends only on `miband_monitor.config` and does not import `ble` (to avoid a cycle).
+- `ble` imports this package through its public functions; `diagnostics` uses `list_adapters/find_device` for self-checks.
 
-## 配置与常量
+## Configuration and constants
 
-| 变量 | 默认 | 说明 |
+| Variable | Default | Description |
 |---|---|---|
-| `MIBAND_BLUEZ_TRUST` | `1` | 连接前把设备设为 `Trusted`，换取 GATT 缓存与内核自动回连 |
-| `MIBAND_BLUEZ_AGENT` | `0` | `1` 注册进程内配对 agent |
-| `MIBAND_BLUEZ_DUPLICATE_DATA` | `0` | BT 5/6 上 `True` 会每 ~5 s 重启扩展扫描，易扫死适配器 |
-| `MIBAND_SMP_SETTLE_DELAY` | `1.5` | `ServicesResolved` 后等待 SMP/profile 探测结算的秒数 |
+| `MIBAND_BLUEZ_TRUST` | `1` | Set the device to `Trusted` before connecting, buying GATT cache and kernel auto-reconnect |
+| `MIBAND_BLUEZ_AGENT` | `0` | `1` registers the in-process pairing agent |
+| `MIBAND_BLUEZ_DUPLICATE_DATA` | `0` | `True` restarts extended scanning every ~5 s on BT 5/6, easily killing the adapter |
+| `MIBAND_SMP_SETTLE_DELAY` | `1.5` | Seconds to wait for SMP/profile discovery to settle after `ServicesResolved` |
 
-关键常量：`BAND_PULSE_PERIOD ≈ 70 s`（待命连接预算下限）、`DBUS_TIMEOUT`、
-`AGENT_MANAGER_*`。
+Key constants: `BAND_PULSE_PERIOD ≈ 70 s` (lower bound of the standby connect budget), `DBUS_TIMEOUT`,
+`AGENT_MANAGER_*`.
 
-## 失败模式
+## Failure modes
 
-| 现象 | 原因 | 处理 |
+| Symptom | Cause | Handling |
 |---|---|---|
-| `failed to discover services, device disconnected`（约 9–10 s） | 未完成 GATT 缓存，手环未认证连接看门狗到期（需枚举 ~150 个句柄） | 自动重试；首次无缓存配对用 `MIBAND_BLUEZ_AGENT=1` 并尽量保持亮屏近距 |
-| `dropped-unresolved`（约 5 s 掉线、`ServicesResolved=False`） | BlueZ 保存了陈旧 `LTK` 导致空口 `LE Start Encryption` 超时（`0x08`） | `wait_for_bluez_link` 在 2 次掉线后提前结束，已配对设备自动触发 `remove_device()` + 配对 agent 自愈 |
-| `UnknownObject ... doesn't exist` | 未配对/已断链后 BlueZ 移除设备对象 | `describe_ble_error` 翻译为可操作提示；重连 |
-| `le-connection-abort-by-local` | 内核 40 s 发起周期未等到脉冲 | `wait_for_bluez_link` 约 150 ms 后原地重挂，**不主动 Disconnect** |
-| `-112 / host is down`、零广播 | BARROT `33fa:0012` 等适配器射频假死 | 只能 USB 复位：`usbreset` 或拔插 + `systemctl restart bluetooth`；D-Bus 电源循环无效 |
-| `No agent available for request type 2` | 手环发起 SMP 而系统无 agent | `MIBAND_BLUEZ_AGENT=1` 或 `bluetoothctl` 手工配对 |
-| MTU 恒 23 | 未调用 `_acquire_mtu()` | 当前版本主动协商；仍出现时查 `try_acquire_mtu` 日志 |
+| `failed to discover services, device disconnected` (about 9–10 s) | GATT cache not complete; the band's unauthenticated-connection watchdog expires (needs ~150 handles enumerated) | Automatic retry; for the first pairing without a cache use `MIBAND_BLUEZ_AGENT=1` and keep the screen on at close range if possible |
+| `dropped-unresolved` (drops after about 5 s, `ServicesResolved=False`) | BlueZ stored a stale `LTK`, causing an over-the-air `LE Start Encryption` timeout (`0x08`) | `wait_for_bluez_link` stops early after 2 drops; a paired device automatically triggers `remove_device()` + pairing-agent self-healing |
+| `UnknownObject ... doesn't exist` | BlueZ removes the device object when unpaired/after disconnect | `describe_ble_error` translates it into an actionable hint; reconnect |
+| `le-connection-abort-by-local` | The kernel's 40 s initiation cycle saw no pulse | `wait_for_bluez_link` re-arms in place after about 150 ms and does **not** actively Disconnect |
+| `-112 / host is down`, zero advertisements | Adapter RF is wedged on BARROT `33fa:0012` and similar | USB reset only: `usbreset` or unplug/replug + `systemctl restart bluetooth`; a D-Bus power cycle does not help |
+| `No agent available for request type 2` | The band initiates SMP but the system has no agent | `MIBAND_BLUEZ_AGENT=1` or manual pairing with `bluetoothctl` |
+| MTU always 23 | `_acquire_mtu()` was not called | The current version negotiates proactively; if it still occurs, inspect the `try_acquire_mtu` logs |
 
-## 测试
+## Tests
 
-- `tests/bluez/`（`test_platform.py`、`test_devices.py`、`test_link.py`、`test_pairing.py`、
-  `test_errors.py`、`test_client_integration.py`、`test_doctor.py`、`test_standby_backoff.py`、
-  `test_self_healing.py`）：D-Bus 属性解析、地址/对象路径、待命预算与宽限期、agent 生命周期、
-  残留连接与陈旧 LTK 自愈、错误翻译与客户端集成路径。
-- 真机证据：[validation/linux-validation.md](../validation/linux-validation.md)、
-  [validation/linux-ble-connect-findings.md](../validation/linux-ble-connect-findings.md)、
-  [validation/linux-ble-test-report.md](../validation/linux-ble-test-report.md)。
+- `tests/bluez/` (`test_platform.py`, `test_devices.py`, `test_link.py`, `test_pairing.py`,
+  `test_errors.py`, `test_client_integration.py`, `test_doctor.py`, `test_standby_backoff.py`,
+  `test_self_healing.py`): D-Bus property parsing, addresses/object paths, standby budget and grace period, agent lifecycle,
+  residual-connection and stale-LTK self-healing, error translation and client integration paths.
+- Hardware evidence: [validation/linux-validation.md](../validation/linux-validation.md),
+  [validation/linux-ble-connect-findings.md](../validation/linux-ble-connect-findings.md),
+  [validation/linux-ble-test-report.md](../validation/linux-ble-test-report.md).
 
-## 相关文档
+## Related documentation
 
 - [guides/cross-platform.md](../guides/cross-platform.md)
-- [modules/ble.md](ble.md)（谁调用这些助手）
-- [modules/diagnostics.md](diagnostics.md)（`--doctor` 如何展示适配器状态）
+- [modules/ble.md](ble.md) (who calls these helpers)
+- [modules/diagnostics.md](diagnostics.md) (how `--doctor` shows adapter state)

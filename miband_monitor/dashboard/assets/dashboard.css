@@ -33,3 +33,31 @@
   canvas { width: 100%; height: 140px; display: block; }
   footer { padding: 10px 20px 20px; color: var(--muted); font-size: 12px; }
   code { color: var(--spo2); }
+  .hidden { display: none !important; }
+  .workout-panel {
+    background: var(--panel); border: 1px solid #2b3f52; border-radius: 12px;
+    padding: 14px 16px; display: grid; gap: 12px;
+  }
+  .wk-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+  .wk-title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 15px; }
+  .wk-meta { display: flex; flex-wrap: wrap; gap: 14px; color: var(--muted); font-size: 12px; }
+  .wk-meta strong { color: var(--text); }
+  .wk-badge {
+    font-size: 11px; padding: 2px 8px; border-radius: 999px;
+    background: #1e293b; color: #94a3b8; font-weight: 600;
+  }
+  .wk-badge.streaming { background: rgba(34, 197, 94, 0.16); color: #4ade80; }
+  .wk-badge.reconnecting { background: rgba(245, 158, 11, 0.18); color: #fbbf24; }
+  .wk-badge.gap_filling { background: rgba(56, 189, 248, 0.18); color: #38bdf8; }
+  .wk-badge.finished { background: rgba(148, 163, 184, 0.2); color: #cbd5e1; }
+  .wk-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 10px; }
+  .wk-card { background: #12171c; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .wk-card .label { color: var(--muted); font-size: 12px; }
+  .wk-card .value { font-size: 20px; font-weight: 700; margin-top: 2px; }
+  .wk-card .unit { font-size: 12px; color: var(--muted); margin-left: 4px; font-weight: 400; }
+  .wk-sub { margin-top: 3px; font-size: 11px; color: var(--muted); }
+  .wk-zones { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+  .wk-zone { background: #12171c; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; font-size: 11px; }
+  .wk-zone-head { display: flex; justify-content: space-between; color: var(--muted); margin-bottom: 4px; }
+  .wk-zone-bar { height: 5px; border-radius: 3px; background: #1f2937; overflow: hidden; }
+  .wk-zone-fill { height: 100%; background: var(--hr); transition: width 0.25s ease; }

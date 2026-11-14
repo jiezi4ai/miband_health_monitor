@@ -30,7 +30,7 @@ from miband_monitor.config.defaults import (
 from miband_monitor.crypto import backend_name as ecdh_backend_name
 from miband_monitor.crypto import native_library_candidates
 
-from .checks import _bleak_version, _env_mode_hint, _mask
+from .checks import _bleak_version, _env_mode_hint, _mask, inspect_usb_autosuspend
 from .report import FAIL, INFO, OK, WARN, _Report
 
 
@@ -159,6 +159,27 @@ async def _check_bluez(report: _Report, device_id: str) -> None:
         "while its screen is off; sliding the screen does not make it advertise",
         hint="use --scan-timeout 120 (default 90); one pulse period is 40-60 s",
     )
+
+    usb_power = inspect_usb_autosuspend(adapter["name"])
+    if usb_power is not None:
+        if usb_power["risky"]:
+            report.add(
+                WARN,
+                f"usb autosuspend ({usb_power['usb_device']})",
+                f"power/control={usb_power['control']} "
+                f"autosuspend_delay_ms={usb_power['delay_ms']}; brief idle pauses "
+                "during long workouts may suspend the Bluetooth controller",
+                hint=(
+                    f"Disable temporarily: echo on | sudo tee {usb_power['power_dir']}/control"
+                ),
+            )
+        else:
+            report.add(
+                OK,
+                f"usb autosuspend ({usb_power['usb_device']})",
+                f"power/control={usb_power['control']} "
+                f"autosuspend_delay_ms={usb_power['delay_ms']}",
+            )
 
     if not device_id:
         return

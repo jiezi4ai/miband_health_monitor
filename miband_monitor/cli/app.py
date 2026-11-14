@@ -27,10 +27,16 @@ from ..dashboard import DashboardServer, TelemetryHub, make_db_history_provider
 from ..history import resolve_band_tz
 from ..storage import TelemetryStore
 from ..storage.export_csv import export_database
+from ..workout import WorkoutSession
 from .args import demo_requested, parse_args
 from .callbacks import build_callbacks
 from .logging import configure_logging
 from .runner import run_demo, run_monitor
+from .workout_runner import (
+    build_workout_profile,
+    format_workout_summary,
+    save_workout_summary,
+)
 
 logger = logging.getLogger("MiBand6Client")
 
@@ -131,7 +137,16 @@ async def main(argv: Optional[list[str]] = None) -> int:
             web_server = None
             hub = None
 
-    callbacks = build_callbacks(store, hub)
+    workout: Optional[WorkoutSession] = None
+    if getattr(args, "workout", False):
+        workout = WorkoutSession(
+            build_workout_profile(args),
+            gap_fill_min_seconds=args.gap_fill_min,
+        )
+        if hub is not None:
+            hub.publish_workout(workout.snapshot(timeline_limit=300))
+
+    callbacks = build_callbacks(store, hub, workout=workout)
     if args.storage == "none":
         logger.info("Storage disabled; telemetry will only be logged.")
     else:
@@ -154,6 +169,11 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 sync_sleep_spo2=args.sync_sleep_spo2,
                 band_tz=band_tz,
                 mtu=args.mtu,
+                hr_silence_soft=args.hr_silence_soft,
+                hr_silence_hard=args.hr_silence_hard,
+                workout=workout,
+                hub=hub,
+                battery_interval=args.battery_interval,
             )
         else:
             await run_monitor(
@@ -171,6 +191,11 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 device_name=device_name,
                 mtu=args.mtu,
                 direct_connect=not args.no_direct_connect,
+                hr_silence_soft=args.hr_silence_soft,
+                hr_silence_hard=args.hr_silence_hard,
+                workout=workout,
+                hub=hub,
+                battery_interval=args.battery_interval,
             )
     except KeyboardInterrupt:
         logger.info("Stopping on user request...")
@@ -178,6 +203,14 @@ async def main(argv: Optional[list[str]] = None) -> int:
         logger.error("Monitoring stopped after error: %s", exc)
         exit_code = 1
     finally:
+        if workout is not None:
+            summary = workout.finish() if workout.ended_at is None else workout.summary()
+            if hub is not None:
+                hub.publish_workout(summary)
+            logger.info("%s", format_workout_summary(summary))
+            if args.storage != "none":
+                summary_path = save_workout_summary(args.output, summary)
+                logger.info("Workout summary written -> %s", summary_path)
         if web_server is not None:
             try:
                 await web_server.stop()
