@@ -14,7 +14,7 @@ import logging
 import math
 import time
 from collections import deque
-from typing import Deque, Dict, List, Optional
+from typing import Any, Callable, Deque, Dict, List, Optional
 
 from ..storage.readers import utc_iso
 from .constants import DEFAULT_MAX_POINTS, DEFAULT_SNAPSHOT_POINTS, METRIC_KINDS, SSE_QUEUE_SIZE
@@ -36,6 +36,7 @@ class TelemetryHub:
         self._subscribers: set[asyncio.Queue] = set()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._events_sent = 0
+        self._state_provider: Optional[Callable[[], Dict[str, Any]]] = None
 
     @property
     def max_points(self) -> int:
@@ -46,6 +47,32 @@ class TelemetryHub:
     def attach_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """Remember the event loop so callbacks from other threads can fan out."""
         self._loop = loop
+
+    def set_state_provider(
+        self, provider: Optional[Callable[[], Dict[str, Any]]]
+    ) -> None:
+        """Attach an optional GUI state snapshot provider for /api/snapshot."""
+        self._state_provider = provider
+
+    def publish_event(
+        self, kind: str, payload: Dict[str, Any], timestamp: Optional[float] = None
+    ) -> None:
+        """Fan out an out-of-band control/log event without storing it in metric series."""
+        event_ts = time.time() if timestamp is None else float(timestamp)
+        record = {
+            "kind": kind,
+            "ts": round(event_ts, 6),
+            "iso_time": utc_iso(event_ts),
+            **payload,
+        }
+        loop = self._loop
+        if loop is not None and loop.is_running():
+            try:
+                loop.call_soon_threadsafe(self._fanout, record)
+                return
+            except RuntimeError:
+                pass
+        self._fanout(record)
 
     # --------------------------------------------------------------- publish
     def publish_heart_rate(self, bpm: int, timestamp: Optional[float] = None) -> None:
@@ -171,6 +198,11 @@ class TelemetryHub:
         }
         if self._workout is not None:
             payload["workout"] = dict(self._workout)
+        if self._state_provider is not None:
+            try:
+                payload["gui"] = self._state_provider()
+            except Exception:
+                pass
         return payload
 
     def history(self, kind: str, limit: int = DEFAULT_SNAPSHOT_POINTS) -> List[dict]:

@@ -23,14 +23,18 @@ logger = logging.getLogger("MiBandDashboard")
 ASSETS_DIR = package_path("dashboard", "assets")
 PAGE_TEMPLATE_NAME = "dashboard.html"
 CSS_ASSET_NAME = "dashboard.css"
+GUI_CSS_ASSET_NAME = "gui_panel.css"
 SCRIPT_ASSET_NAME = "dashboard.js"
 WORKOUT_SCRIPT_ASSET_NAME = "workout.js"
+GUI_SCRIPT_ASSET_NAME = "gui_panel.js"
 
 #: Markers in the HTML shell that the assets replace. They are deliberately
 #: unique strings so composition is a single pass with no parser dependency.
 CSS_TOKEN = "__DASHBOARD_CSS__"
+GUI_CSS_TOKEN = "__GUI_PANEL_CSS__"
 SCRIPT_TOKEN = "__DASHBOARD_SCRIPT__"
 WORKOUT_SCRIPT_TOKEN = "__WORKOUT_SCRIPT__"
+GUI_SCRIPT_TOKEN = "__GUI_PANEL_SCRIPT__"
 
 #: Minimal page served when the dashboard assets cannot be read. It must keep
 #: the JSON/SSE API discoverable, matching the historical fallback behaviour.
@@ -49,22 +53,26 @@ _FALLBACK_INDEX = FALLBACK_INDEX
 
 
 @lru_cache(maxsize=1)
-def _load_assets() -> Tuple[str, str, str, str]:
-    """Read the page shell and inline assets once (text, CSS, JS, workout JS)."""
+def _load_assets() -> Tuple[str, str, str, str, str, str]:
+    """Read the page shell and inline assets once."""
     base = Path(ASSETS_DIR)
     shell = (base / PAGE_TEMPLATE_NAME).read_text(encoding="utf-8")
     css = (base / CSS_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
+    gui_css = (base / GUI_CSS_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
     script = (base / SCRIPT_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
     workout_script = (base / WORKOUT_SCRIPT_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
-    return shell, css, script, workout_script
+    gui_script = (base / GUI_SCRIPT_ASSET_NAME).read_text(encoding="utf-8").rstrip("\n")
+    return shell, css, gui_css, script, workout_script, gui_script
 
 
 def compose_page() -> str:
     """Return the single-file dashboard HTML (CSS/JS inserted inline)."""
-    shell, css, script, workout_script = _load_assets()
+    shell, css, gui_css, script, workout_script, gui_script = _load_assets()
     return (
         shell.replace(CSS_TOKEN, css)
+        .replace(GUI_CSS_TOKEN, gui_css)
         .replace(WORKOUT_SCRIPT_TOKEN, workout_script)
+        .replace(GUI_SCRIPT_TOKEN, gui_script)
         .replace(SCRIPT_TOKEN, script)
     )
 

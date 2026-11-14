@@ -20,6 +20,16 @@ from __future__ import annotations
 from .checks import _bleak_version, _env_mode_hint, _mask
 from .doctor import _auth_helpers, _check_bluez, run_doctor
 from .live_scan import SCAN_SECONDS, main as live_scan_main
+from .playbook_runners import run_playbook
+from .playbooks import (
+    PLAYBOOK_CATALOG,
+    PlaybookResult,
+    PlaybookSpec,
+    get_playbook,
+    list_playbooks,
+    recommend_from_report_lines,
+    recommend_playbooks,
+)
 from .report import FAIL, INFO, OK, WARN, _MARK, _PREFIX, _Report
 from .scanning import scan_devices
 
@@ -40,4 +50,12 @@ __all__ = [
     "_mask",
     "_auth_helpers",
     "_check_bluez",
+    "PLAYBOOK_CATALOG",
+    "PlaybookResult",
+    "PlaybookSpec",
+    "get_playbook",
+    "list_playbooks",
+    "recommend_from_report_lines",
+    "recommend_playbooks",
+    "run_playbook",
 ]

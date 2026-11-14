@@ -127,6 +127,18 @@ function renderAll() {
 
 function applyRecord(record) {
   const kind = record.kind;
+  if (kind === "gui_state" && record.gui) {
+    if (window.MiBandGui) window.MiBandGui.applyGuiState(record.gui);
+    return;
+  }
+  if (kind === "gui_log" && record.entry) {
+    if (window.MiBandGui) window.MiBandGui.appendLogLine(record.entry);
+    return;
+  }
+  if (kind === "playbook_result" && record.result) {
+    if (window.MiBandGui) window.MiBandGui.renderPlaybookOutput(record.result);
+    return;
+  }
   if (kind === "workout" && record.workout) {
     if (window.MiBandWorkout) window.MiBandWorkout.applyWorkout(record.workout, series, MAX_POINTS);
     messageCount += 1;
@@ -184,6 +196,9 @@ function applySnapshot(snapshot) {
   }
   if (snapshot.workout && window.MiBandWorkout) {
     window.MiBandWorkout.applyWorkout(snapshot.workout, series, MAX_POINTS);
+  }
+  if (snapshot.gui && window.MiBandGui) {
+    window.MiBandGui.applyGuiState(snapshot.gui);
   }
   setText("events", String(snapshot.events_sent || 0));
   messageCount = snapshot.events_sent || 0;

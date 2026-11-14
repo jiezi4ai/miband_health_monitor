@@ -21,7 +21,7 @@ import asyncio
 import logging
 from http import HTTPStatus
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 from urllib.parse import parse_qs
 
 from .constants import (
@@ -32,6 +32,7 @@ from .constants import (
     SNAPSHOT_POINTS,
     SSE_KEEPALIVE_SECONDS,
 )
+from .gui_routes import handle_gui_request
 from .http import send_json, send_response, send_sse, send_sse_headers
 from .hub import TelemetryHub
 from .page import fallback_index_bytes, page_bytes
@@ -49,6 +50,7 @@ class DashboardServer:
         port: int = 8080,
         index_path: Optional[str | Path] = None,
         history_provider: Optional[Callable[[str, int], List[dict]]] = None,
+        controller: Optional[Any] = None,
     ) -> None:
         self.hub = hub
         self.host = host
@@ -57,6 +59,7 @@ class DashboardServer:
         #: A path is honoured as an override (missing/unreadable -> fallback page).
         self.index_path = Path(index_path) if index_path is not None else None
         self.history_provider = history_provider
+        self.controller = controller
         self._server: Optional[asyncio.AbstractServer] = None
         self._port = self._requested_port
         self._tasks: set[asyncio.Task] = set()
@@ -138,13 +141,24 @@ class DashboardServer:
                 await send_json(writer, HTTPStatus.BAD_REQUEST, {"error": "malformed request"})
                 return
 
-            while True:  # drain headers
+            headers: Dict[str, str] = {}
+            while True:  # collect headers
                 header = await asyncio.wait_for(reader.readline(), timeout=HTTP_HEADER_TIMEOUT)
                 if header in (b"\r\n", b"\n", b""):
                     break
+                line = header.decode("latin-1").strip()
+                if ":" in line:
+                    k, v = line.split(":", 1)
+                    headers[k.strip().lower()] = v.strip()
 
             path, _, query = target.partition("?")
             params = parse_qs(query)
+
+            if path.startswith("/api/gui/"):
+                await handle_gui_request(
+                    self.controller, method, path, headers, reader, writer
+                )
+                return
 
             if method != "GET":
                 await send_json(writer, HTTPStatus.METHOD_NOT_ALLOWED, {"error": "GET only"})

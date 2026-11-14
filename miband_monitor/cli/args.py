@@ -193,6 +193,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="run an environment self-check and exit (never connects to the band)",
     )
     parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="launch the interactive Web GUI console and connection troubleshooter",
+    )
+    parser.add_argument(
         "--no-direct-connect",
         action="store_true",
         help=(

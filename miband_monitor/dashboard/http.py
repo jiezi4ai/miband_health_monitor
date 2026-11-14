@@ -27,9 +27,33 @@ SSE_RESPONSE_HEADERS = (
 )
 
 
+_MAX_JSON_BODY_BYTES = 65536
+
+
 def encode_json(payload: Any) -> bytes:
     """Serialize a JSON response body (UTF-8, non-ASCII kept readable)."""
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
+
+
+async def read_json_body(
+    reader: asyncio.StreamReader,
+    headers: Dict[str, str],
+    timeout: float = 5.0,
+) -> Dict[str, Any]:
+    """Read and parse a bounded JSON request body."""
+    raw_len = headers.get("content-length", "").strip()
+    if not raw_len:
+        return {}
+    length = int(raw_len)
+    if length < 0 or length > _MAX_JSON_BODY_BYTES:
+        raise ValueError(f"request body exceeds {_MAX_JSON_BODY_BYTES} bytes")
+    if length == 0:
+        return {}
+    raw = await asyncio.wait_for(reader.readexactly(length), timeout=timeout)
+    parsed = json.loads(raw.decode("utf-8"))
+    if not isinstance(parsed, dict):
+        raise ValueError("JSON body must be an object")
+    return parsed
 
 
 async def send_response(
@@ -74,4 +98,12 @@ async def send_sse(writer: asyncio.StreamWriter, payload: Dict) -> None:
     await writer.drain()
 
 
-__all__ = ["SSE_RESPONSE_HEADERS", "encode_json", "send_json", "send_response", "send_sse", "send_sse_headers"]
+__all__ = [
+    "SSE_RESPONSE_HEADERS",
+    "encode_json",
+    "read_json_body",
+    "send_json",
+    "send_response",
+    "send_sse",
+    "send_sse_headers",
+]

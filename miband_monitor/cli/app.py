@@ -97,6 +97,20 @@ async def main(argv: Optional[list[str]] = None) -> int:
             args.output,
         )
 
+    if getattr(args, "gui", False):
+        from ..gui.app import run_gui_server
+
+        port = 8080 if args.web_port is None else args.web_port
+        return await run_gui_server(
+            host=args.web_host,
+            port=port,
+            output_dir=args.output,
+            storage_backend=args.storage,
+            open_browser=True,
+            auto_connect=False,
+            demo=demo_requested(args),
+        )
+
     logger.info("ECDH backend: %s", ecdh_backend_name())
 
     device_id = (args.device_id or "").strip()

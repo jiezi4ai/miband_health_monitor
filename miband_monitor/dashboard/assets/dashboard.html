@@ -6,13 +6,97 @@
 <title>Mi Band 6 实时看板</title>
 <style>
 __DASHBOARD_CSS__
+__GUI_PANEL_CSS__
 </style>
 </head>
 <body>
 <header>
-  <h1>⌚ Mi Band 6 实时看板</h1>
+  <h1>⌚ Mi Band 6 实时控制台</h1>
+  <span id="guiPhaseBadge" class="gui-pill hidden">待命</span>
+  <span id="guiBanner" class="gui-pill hidden"></span>
   <div id="status"><span class="dot" id="dot"></span><span id="statusText">连接中…</span></div>
 </header>
+
+<section id="guiToolbar" class="gui-toolbar hidden">
+  <div class="gui-group">
+    <button id="guiConnectBtn" class="gui-btn primary">开始连接</button>
+    <button id="guiStopBtn" class="gui-btn danger" disabled>停止连接</button>
+    <label class="gui-check"><input type="checkbox" id="optDemo"> 模拟手环 (Demo)</label>
+    <label class="gui-check"><input type="checkbox" id="optImu"> 25Hz IMU</label>
+    <label class="gui-check"><input type="checkbox" id="optWorkout"> 运动模式</label>
+    <label class="gui-check">历史同步
+      <select id="optHistoryDays" class="gui-select">
+        <option value="0">关闭</option>
+        <option value="1">1天</option>
+        <option value="3">3天</option>
+        <option value="7">7天</option>
+      </select>
+    </label>
+  </div>
+  <div class="gui-group gui-spacer">
+    <span class="gui-pill" id="guiCfgSummary">未配置设备</span>
+    <button id="guiDoctorBtn" class="gui-btn">环境自检</button>
+    <button id="guiConfigBtn" class="gui-btn">凭据设置</button>
+    <button id="guiExportBtn" class="gui-btn">导出 CSV</button>
+    <button id="guiToggleCenterBtn" class="gui-btn">连接引导与排障</button>
+  </div>
+</section>
+
+<section id="guiConfigDrawer" class="gui-drawer hidden">
+  <div class="gui-box-head" style="margin-bottom:10px">
+    <span class="gui-box-title">设备凭据配置（安全写入本地 .env，权限 0600；留空字段保持原值，密钥永不回传前端）</span>
+    <button id="guiScanBtn" class="gui-btn sm">扫描附近手环 (12s)</button>
+  </div>
+  <div id="guiScanResults" class="gui-scan-list"></div>
+  <div class="gui-form" style="margin-top:8px">
+    <label class="gui-field">设备地址 (DEVICE_ID: MAC 或 macOS UUID)
+      <input id="cfgDeviceId" class="gui-input" placeholder="如 EC:39:C2:AA:BB:CC">
+    </label>
+    <label class="gui-field">认证密钥 (32位 Hex AUTH_KEY，仅写入不回显)
+      <input id="cfgAuthKey" class="gui-input" type="password" placeholder="32 位十六进制字符串">
+    </label>
+    <label class="gui-field">广播名称过滤 (DEVICE_NAME，可选)
+      <input id="cfgDeviceName" class="gui-input" placeholder="如 Mi Smart Band">
+    </label>
+    <label class="gui-field">手环时区 (BAND_TZ，可选)
+      <input id="cfgBandTz" class="gui-input" placeholder="如 Asia/Shanghai">
+    </label>
+  </div>
+  <div style="margin-top:10px;display:flex;gap:8px">
+    <button id="guiSaveCfgBtn" class="gui-btn primary sm">安全保存配置</button>
+  </div>
+</section>
+
+<section id="guiCenter" class="gui-center hidden">
+  <div class="gui-grid">
+    <div class="gui-box">
+      <div class="gui-box-head">
+        <span class="gui-box-title">五步连接向导 &amp; 用户配合</span>
+        <span class="gui-pill">尝试第 <strong id="guiAttempt">0</strong> 轮</span>
+      </div>
+      <div class="gui-metrics-bar">
+        <span>扫描已等待 <strong id="guiElapsed">0</strong>s</span>
+        <span>手环脉冲 <strong id="guiBandPkts">0</strong></span>
+        <span>周围 BLE 包 <strong id="guiOtherPkts">0</strong></span>
+      </div>
+      <div id="guiSteps" class="gui-steps"></div>
+      <ul id="guiTips" class="gui-tips"></ul>
+    </div>
+
+    <div class="gui-box">
+      <div class="gui-box-head">
+        <span class="gui-box-title">脚本化一键排障中心 (Playbooks)</span>
+      </div>
+      <div id="guiPlaybooks" class="gui-playbooks"></div>
+      <pre id="guiPbSummary" class="gui-logs hidden" style="max-height:95px"></pre>
+      <div id="guiCmdBox" class="gui-cmd-box hidden">
+        <code id="guiCmdText"></code>
+        <button id="guiCopyCmdBtn" class="gui-btn sm">复制命令</button>
+      </div>
+      <div id="guiLogs" class="gui-logs">等待会话日志…</div>
+    </div>
+  </div>
+</section>
 
 <main>
   <section id="workoutPanel" class="workout-panel hidden">
@@ -63,7 +147,7 @@ __DASHBOARD_CSS__
       <canvas id="hrChart"></canvas></div>
     <div class="chart"><h2><span>血氧趋势</span><span id="spo2Range"></span></h2>
       <canvas id="spo2Chart"></canvas></div>
-    <div class="chart"><h2><span>步数增长</span><span id="stepsRange"></span></h2>
+    <div class="chart"><h2><span>步数增长</span><span id="stepsChart"></span></h2>
       <canvas id="stepsChart"></canvas></div>
     <div class="chart"><h2><span>IMU 合加速度</span><span id="imuRange"></span></h2>
       <canvas id="imuChart"></canvas></div>
@@ -77,6 +161,9 @@ __DASHBOARD_CSS__
 
 <script>
 __WORKOUT_SCRIPT__
+</script>
+<script>
+__GUI_PANEL_SCRIPT__
 </script>
 <script>
 __DASHBOARD_SCRIPT__
