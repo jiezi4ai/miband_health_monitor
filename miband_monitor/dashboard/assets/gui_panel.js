@@ -141,11 +141,15 @@
     if (gEl("guiToolbar")) gEl("guiToolbar").classList.remove("hidden");
     if (gEl("guiConnectBtn")) gEl("guiConnectBtn").disabled = Boolean(gui.running);
     if (gEl("guiStopBtn")) gEl("guiStopBtn").disabled = !gui.running;
+    if (gEl("guiScanBtn")) gEl("guiScanBtn").disabled = Boolean(gui.running);
 
     const phaseEl = gEl("guiPhaseBadge");
     if (phaseEl) {
       phaseEl.textContent = gui.status_message || gui.phase;
       phaseEl.className = "gui-pill " + (gui.connected ? "ok" : gui.phase === "error" ? "err" : "warn");
+    }
+    if (gui.last_error && (gui.phase === "error" || gui.phase === "reconnecting")) {
+      showToast(gui.last_error, "err");
     }
     const set = (id, v) => { const n = gEl(id); if (n) n.textContent = String(v); };
     set("guiElapsed", gui.scan_elapsed_s || 0);
@@ -156,6 +160,15 @@
       set("guiCfgSummary", gui.config.device_id_configured
         ? gui.config.device_id_masked + (gui.config.auth_key_valid ? " · 密钥就绪" : " · 密钥无效")
         : "未配置设备");
+      if (gEl("cfgDeviceId") && gui.config.device_id_masked) {
+        gEl("cfgDeviceId").placeholder = "当前: " + gui.config.device_id_masked + " (留空保持不变)";
+      }
+      if (gEl("cfgDeviceName") && !gEl("cfgDeviceName").value && gui.config.device_name) {
+        gEl("cfgDeviceName").value = gui.config.device_name;
+      }
+      if (gEl("cfgBandTz") && !gEl("cfgBandTz").value && gui.config.band_tz) {
+        gEl("cfgBandTz").value = gui.config.band_tz;
+      }
     }
     renderSteps(gui);
     renderTips(gui);

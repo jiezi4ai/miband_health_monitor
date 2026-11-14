@@ -159,7 +159,7 @@ class GuiLogBridge(logging.Handler):
                 self._state.status_message = "BLE link dropped; preparing fast reconnect..."
                 changed = True
 
-        if "reconnecting in" in lower:
+        if "reconnecting in" in lower or ("session " in lower and " failed:" in lower):
             self._state.connected = False
             self._state.phase = "reconnecting"
             self._state.status_message = message

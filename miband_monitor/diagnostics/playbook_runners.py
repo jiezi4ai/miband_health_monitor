@@ -10,6 +10,7 @@ from miband_monitor import bluez
 from miband_monitor.ble.identity import is_placeholder_device_id
 from miband_monitor.config.defaults import DEFAULT_DATA_DIR
 from miband_monitor.config.env import secure_env_file
+from miband_monitor.config.paths import default_env_path
 from miband_monitor.config.privacy import mask_address
 
 from .playbook_privileged import (
@@ -179,7 +180,11 @@ async def run_fix_env_permissions(env_path: Optional[Path] = None) -> PlaybookRe
             status="skipped",
             summary="Skipped: POSIX chmod 0600 does not apply on Windows.",
         )
-    target = Path(env_path) if env_path is not None else Path(".env")
+    if env_path is not None:
+        target = Path(env_path)
+    else:
+        cwd_env = Path(".env")
+        target = cwd_env if cwd_env.is_file() else default_env_path()
     if not target.is_file():
         return PlaybookResult(
             id="fix_env_permissions",

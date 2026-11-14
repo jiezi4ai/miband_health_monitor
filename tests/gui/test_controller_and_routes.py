@@ -14,11 +14,19 @@ from miband_monitor.gui.log_bridge import GuiLogBridge
 from miband_monitor.gui.state import GuiState
 
 
-async def _http_req(port: int, method: str, path: str, body: dict | None = None):
+async def _http_req(
+    port: int,
+    method: str,
+    path: str,
+    body: dict | None = None,
+    extra_headers: list[str] | None = None,
+):
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     try:
         raw_body = b""
         headers = [f"{method} {path} HTTP/1.1", "Host: 127.0.0.1", "Connection: close"]
+        if extra_headers:
+            headers.extend(extra_headers)
         if body is not None:
             raw_body = json.dumps(body).encode("utf-8")
             headers.append("Content-Type: application/json")
@@ -164,6 +172,22 @@ async def test_gui_routes_demo_session_scan_and_export(tmp_path, monkeypatch):
         assert snap["counts"]["heart_rate"] >= 1
         assert snap["counts"]["steps"] >= 1
         assert snap["gui"]["phase"] == "streaming"
+
+        # 3b. Scanning while a session is active must be rejected to avoid HCI collision
+        st_scan, scan_err = await _http_req(server.port, "POST", "/api/gui/scan", {"duration": 3})
+        assert st_scan == 400
+        assert "Stop the active monitoring session" in scan_err["error"]
+
+        # 3c. Cross-origin POST must be rejected with 403 Forbidden
+        st_csrf, csrf_err = await _http_req(
+            server.port,
+            "POST",
+            "/api/gui/disconnect",
+            {},
+            extra_headers=["Origin: https://evil.example"],
+        )
+        assert st_csrf == 403
+        assert "Cross-origin" in csrf_err["error"]
 
         # 4. Disconnect and export CSV
         st, stop_resp = await _http_req(server.port, "POST", "/api/gui/disconnect", {})

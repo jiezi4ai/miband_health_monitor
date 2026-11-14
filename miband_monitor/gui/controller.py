@@ -203,6 +203,8 @@ class GuiSessionController:
     async def execute_playbook(
         self, playbook_id: str, *, probe_duration: float = 15.0
     ) -> dict[str, Any]:
+        if self.state.running and playbook_id not in ("doctor_check", "fix_env_permissions"):
+            await self.stop_session()
         if self.env_path is not None and self.env_path.exists():
             load_env(self.env_path)
         device_id = _env_device_id()
@@ -235,6 +237,8 @@ class GuiSessionController:
 
     async def quick_scan(self, duration: float = 12.0) -> dict[str, Any]:
         """Scan for nearby BLE devices so users can pick their Mi Band ID."""
+        if self._session_task is not None and not self._session_task.done():
+            raise RuntimeError("Stop the active monitoring session before scanning for devices.")
         timeout = max(3.0, min(float(duration), 60.0))
         kwargs: dict[str, Any] = {}
         if sys.platform.startswith("linux"):

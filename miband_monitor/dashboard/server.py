@@ -142,7 +142,7 @@ class DashboardServer:
                 return
 
             headers: Dict[str, str] = {}
-            while True:  # collect headers
+            for _ in range(64):  # collect bounded headers
                 header = await asyncio.wait_for(reader.readline(), timeout=HTTP_HEADER_TIMEOUT)
                 if header in (b"\r\n", b"\n", b""):
                     break
@@ -150,6 +150,9 @@ class DashboardServer:
                 if ":" in line:
                     k, v = line.split(":", 1)
                     headers[k.strip().lower()] = v.strip()
+            else:
+                await send_json(writer, HTTPStatus.REQUEST_HEADER_FIELDS_TOO_LARGE, {"error": "too many headers"})
+                return
 
             path, _, query = target.partition("?")
             params = parse_qs(query)
