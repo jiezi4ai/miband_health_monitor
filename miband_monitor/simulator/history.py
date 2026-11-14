@@ -45,10 +45,11 @@ class HistoryMixin:
                 )
                 return
             data_type = data[1]
+            band_tz = getattr(self, "band_tz", None)
             try:
-                since = decode_fetch_time(data[2:])
+                since = decode_fetch_time(data[2:], tz=band_tz)
             except Exception:
-                since = datetime.now()
+                since = datetime.now(tz=band_tz)
             payload, start_timestamp = self._build_history_payload(data_type, since)
             if payload is None:  # unsupported data type
                 self._emit_later(
@@ -60,12 +61,14 @@ class HistoryMixin:
             # answers with the epoch calendar (1970-01-01) when the fetch is
             # empty -- reproduced here so the "nothing new" path is exercised.
             echoed = (
-                datetime.fromtimestamp(start_timestamp) if payload else datetime(1970, 1, 1)
+                datetime.fromtimestamp(start_timestamp, tz=band_tz)
+                if payload
+                else datetime(1970, 1, 1)
             )
             metadata = (
                 bytes([RESPONSE, COMMAND_START_DATE, SUCCESS])
                 + len(payload).to_bytes(4, "little")
-                + encode_fetch_time(echoed)
+                + encode_fetch_time(echoed, tz=band_tz)
             )
             self._emit_later(UUID_CHAR_FETCH, metadata, 0.001)
             return

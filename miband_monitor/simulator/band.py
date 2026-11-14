@@ -22,6 +22,7 @@ challenge response, ``drop_auth_seqs`` drops selected auth fragments and
 from __future__ import annotations
 
 import asyncio
+from datetime import tzinfo
 import os
 import time
 from typing import Callable, Optional
@@ -73,10 +74,12 @@ class SimulatedBand(HistoryMixin, AuthMixin, StreamMixin):
         freeze_on_connections: Optional[tuple[int, ...]] = None,
         resurrect_on_rearm: bool = False,
         battery_level: Optional[int] = 85,
+        band_tz: Optional[tzinfo] = None,
     ) -> None:
         if len(auth_key) != 16:
             raise ValueError("auth_key must be 16 bytes")
         self.auth_key = bytes(auth_key)
+        self.band_tz = band_tz
         self._prv_key, self._pub_key = generate_ecdh_keys()
         self._salt = os.urandom(16)
         self._session_key: Optional[bytes] = None

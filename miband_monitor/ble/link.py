@@ -209,9 +209,28 @@ class LinkMixin:
             dev_path = details.get("path") if isinstance(details, dict) else None
             link_kwargs = {"device_path": dev_path} if dev_path else {}
             prior_drops = int(getattr(self, "_unresolved_drops", 0) or 0)
-            outcome = await bluez.wait_for_bluez_link(
-                self.device_id, timeout=max(3.0, slice_timeout), **link_kwargs
+
+            async def _trust_scanned_device() -> None:
+                # Yield past the initial Connect D-Bus send so we do not burn
+                # the ~10 ms pulse window, then mark Trusted before BlueZ GC
+                # removes temporary objects (~30-40 s TemporaryTimeout).
+                await asyncio.sleep(1.0)
+                await self._ensure_bluez_ready(device)
+
+            trust_task = (
+                asyncio.create_task(_trust_scanned_device())
+                if phase == "scan" and device is not None
+                else None
             )
+            try:
+                outcome = await bluez.wait_for_bluez_link(
+                    self.device_id, timeout=max(3.0, slice_timeout), **link_kwargs
+                )
+            finally:
+                if trust_task is not None and not trust_task.done():
+                    trust_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await trust_task
             if not outcome["ready"]:
                 errors = outcome.get("errors") or []
                 detail = f" [{errors[-1]}]" if errors else ""

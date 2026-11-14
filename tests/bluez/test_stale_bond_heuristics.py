@@ -257,3 +257,43 @@ async def test_open_bluez_link_defers_ready_check_until_after_wait_for_link(
 
     await client._open_bluez_link(None, scan_timeout=75.0, connect_timeout=75.0)
     assert events == [("ready", None), "discover", "wait_for_bluez_link", ("ready", MAC)]
+
+
+async def test_open_bluez_link_marks_scanned_device_trusted_during_wait(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1000.0]
+    events: list[object] = []
+    real_sleep = asyncio.sleep
+
+    async def fake_wait(_addr: str, *, timeout: float, **_kw):
+        events.append("wait_start")
+        # Let the background trust task (asyncio.sleep(1.0) patched to 0) finish.
+        await real_sleep(0)
+        await real_sleep(0)
+        events.append("wait_end")
+        return {
+            "ready": True,
+            "reason": "resolved",
+            "attempts": 1,
+            "dropped_unresolved": 0,
+            "info": {"ble": FakeDevice(MAC)},
+        }
+
+    _patch_stale_bond_env(monkeypatch, now=now, wait_fn=fake_wait)
+    client = _make_stub_client()
+
+    async def track_discover(*_a, **_kw):
+        events.append("discover")
+        return FakeDevice(MAC)
+
+    async def track_ready(device=None) -> None:
+        events.append(("ready", getattr(device, "address", None)))
+
+    client._discover_device = track_discover  # type: ignore[method-assign]
+    client._ensure_bluez_ready = track_ready  # type: ignore[method-assign]
+
+    await client._open_bluez_link(None, scan_timeout=75.0, connect_timeout=75.0)
+    assert events[:4] == [("ready", None), "discover", "wait_start", ("ready", MAC)]
+    assert events[-1] == ("ready", MAC)
+    assert "wait_end" in events and events.index(("ready", MAC), 1) < events.index("wait_end")

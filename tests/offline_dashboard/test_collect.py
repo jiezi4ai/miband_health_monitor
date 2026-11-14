@@ -114,14 +114,17 @@ def test_activity_band_without_sessions_has_no_sleep_cells():
 
 
 def test_steps_are_grouped_by_local_day(tmp_path):
-    day_one = datetime(2026, 11, 7, 10, 0).timestamp()
-    day_two = datetime(2026, 11, 8, 10, 0).timestamp()
+    anchor = datetime.now().replace(hour=10, minute=0, second=0, microsecond=0)
+    d1 = anchor - timedelta(days=3)
+    d2 = anchor - timedelta(days=2)
+    day_one = d1.timestamp()
+    day_two = d2.timestamp()
     activity = [(day_one, 16, 0, 500, 0), (day_one + 60, 16, 0, 250, 0), (day_two, 16, 0, 300, 0)]
 
     steps = collect(make_db(tmp_path, activity=activity), days=7)["steps"]
     assert steps["daily"] == [
-        {"date": "2026-11-07", "steps": 750},
-        {"date": "2026-11-08", "steps": 300},
+        {"date": d1.strftime("%Y-%m-%d"), "steps": 750},
+        {"date": d2.strftime("%Y-%m-%d"), "steps": 300},
     ]
     assert steps["total"] == 1050
     assert len(steps["hourly_today"]) == 24

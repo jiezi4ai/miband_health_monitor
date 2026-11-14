@@ -59,6 +59,7 @@ async def test_sync_history_since_and_until_ts_filters_window() -> None:
     base = int((time.time() - 600) // 60) * 60
     band = SimulatedBand(
         auth_key=AUTH_KEY_BYTES,
+        band_tz=timezone.utc,
         history_activity=[
             _activity_sample(base, steps=10, heart_rate=110),
             _activity_sample(base + 60, steps=25, heart_rate=135),
@@ -86,6 +87,7 @@ async def test_workout_reconnect_gap_fill_and_storage_separation(tmp_path) -> No
     now_min = int(time.time() // 60) * 60
     band = SimulatedBand(
         auth_key=AUTH_KEY_BYTES,
+        band_tz=timezone.utc,
         hr_values=(136, 142, 146),
         continuous_interval=0.03,
         disconnect_after=0.08,
