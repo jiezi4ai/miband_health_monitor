@@ -9,12 +9,15 @@ simulated session and export CSV on shutdown.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import os
+import signal
 from pathlib import Path
 from typing import Optional
 
 from ..ble.identity import is_placeholder_device_id, normalize_auth_key
+from ..bluez.platform import is_bluez_platform
 from ..config.demo import DEMO_AUTH_KEY_HEX, DEMO_DEVICE_ID
 from ..config.defaults import (
     DEFAULT_MTU_MAX,
@@ -24,6 +27,7 @@ from ..config.defaults import (
 from ..config.env import env_str
 from ..crypto.facade import backend_name as ecdh_backend_name
 from ..dashboard import DashboardServer, TelemetryHub, make_db_history_provider
+from ..diagnostics.checks import warn_usb_autosuspend_preflight
 from ..history import resolve_band_tz
 from ..storage import TelemetryStore
 from ..storage.export_csv import export_database
@@ -39,6 +43,43 @@ from .workout_runner import (
 )
 
 logger = logging.getLogger("MiBand6Client")
+
+
+async def _run_with_sigterm(awaitable) -> None:
+    """Await *awaitable* in a sub-task so SIGTERM triggers clean teardown."""
+    task = asyncio.ensure_future(awaitable)
+    loop = asyncio.get_running_loop()
+    sigterm_received = False
+
+    def _on_sigterm() -> None:
+        nonlocal sigterm_received
+        if sigterm_received:
+            return
+        sigterm_received = True
+        logger.info("Received SIGTERM; shutting down cleanly...")
+        task.cancel()
+
+    registered = False
+    if hasattr(signal, "SIGTERM"):
+        try:
+            loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
+            registered = True
+        except (NotImplementedError, RuntimeError):
+            registered = False
+    try:
+        await task
+    except asyncio.CancelledError:
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(BaseException):
+                await task
+        if sigterm_received:
+            return
+        raise
+    finally:
+        if registered:
+            with contextlib.suppress(Exception):
+                loop.remove_signal_handler(signal.SIGTERM)
 
 
 async def main(argv: Optional[list[str]] = None) -> int:
@@ -156,10 +197,13 @@ async def main(argv: Optional[list[str]] = None) -> int:
             Path(args.output).resolve(),
         )
 
+    if not demo and is_bluez_platform():
+        warn_usb_autosuspend_preflight(logger)
+
     exit_code = 0
     try:
         if demo:
-            await run_demo(
+            coro = run_demo(
                 device_id,
                 key,
                 duration=args.duration,
@@ -176,7 +220,7 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 battery_interval=args.battery_interval,
             )
         else:
-            await run_monitor(
+            coro = run_monitor(
                 device_id,
                 key,
                 duration=args.duration,
@@ -197,6 +241,7 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 hub=hub,
                 battery_interval=args.battery_interval,
             )
+        await _run_with_sigterm(coro)
     except KeyboardInterrupt:
         logger.info("Stopping on user request...")
     except Exception as exc:

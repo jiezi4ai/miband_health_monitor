@@ -34,6 +34,7 @@ from .chunked import (
 from .client import MiBand6Client, StreamCallbacks
 from .backends import BleakClient, BleakScanner
 from .crypto import _aes_cbc_encrypt, encrypt_challenge
+from .discovery import AdapterDeafError
 from .identity import (
     PLACEHOLDER_DEVICE_PREFIXES,
     _env_device_id,
@@ -87,6 +88,7 @@ __all__ = [
     # Client and callbacks
     "MiBand6Client",
     "StreamCallbacks",
+    "AdapterDeafError",
     "BleakClient",
     "BleakScanner",
     # GATT UUIDs

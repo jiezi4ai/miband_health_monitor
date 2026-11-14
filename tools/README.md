@@ -13,6 +13,7 @@ module docstring before running one.
 | probe_declared.py | Ask the firmware how much history it still holds without consuming it. |
 | probe_fetch_types.py | Query arbitrary history type codes and print the start-date reply. |
 | probe_sleep_session.py | Probe the Huami SLEEP_SESSION (0x48) history type. |
+| probe_battery.py | Non-destructively probe whether the standard Bluetooth Battery Service (0x180F / 0x2A19) is available. |
 | calibrate_sleep.py | Compare candidate readings of the sleep bytes against Zepp Life numbers. |
 | check_file_sizes.py | CI guard: first-party code/asset files must stay <= 300 lines. |
 | check_privacy.py | CI guard: no real MAC/auth key/home path in Git-tracked files. |

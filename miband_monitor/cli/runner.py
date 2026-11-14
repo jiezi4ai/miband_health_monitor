@@ -13,8 +13,10 @@ import time
 from typing import Callable, Optional
 
 from ..ble.client import MiBand6Client, StreamCallbacks
+from ..ble.discovery import AdapterDeafError
 from ..bluez.errors import describe_ble_error
 from ..config.defaults import (
+    DEFAULT_ADAPTER_DEAF_LIMIT,
     DEFAULT_BATTERY_POLL_SECONDS,
     DEFAULT_CONNECT_TIMEOUT,
     DEFAULT_HR_SILENCE_HARD_SECONDS,
@@ -23,7 +25,9 @@ from ..config.defaults import (
     DEFAULT_RECONNECT_INITIAL_DELAY,
     DEFAULT_RECONNECT_MAX_DELAY,
     DEFAULT_SCAN_TIMEOUT,
+    ENV_ADAPTER_DEAF_LIMIT,
 )
+from ..config.env import env_int
 from ..dashboard import TelemetryHub
 from ..history.sync import summarize_history_result, sync_history
 from ..workout import WorkoutSession
@@ -95,6 +99,7 @@ async def run_monitor(
     hub: Optional[TelemetryHub] = None,
     battery_interval: float = DEFAULT_BATTERY_POLL_SECONDS,
     workout_reconcile: bool = True,
+    adapter_deaf_limit: Optional[int] = None,
     client_factory: Optional[Callable[[str, str], MiBand6Client]] = None,
 ) -> None:
     """Connect + stream until duration elapses, reconnecting with backoff."""
@@ -121,6 +126,12 @@ async def run_monitor(
     history_synced = False
     unresolved_drop_streak = 0
     stale_bond_reset_done = False
+    adapter_deaf_streak = 0
+    deaf_limit = (
+        env_int(ENV_ADAPTER_DEAF_LIMIT, DEFAULT_ADAPTER_DEAF_LIMIT)
+        if adapter_deaf_limit is None
+        else int(adapter_deaf_limit)
+    )
 
     while True:
         active_deadline = (
@@ -143,12 +154,16 @@ async def run_monitor(
             client._stale_bond_reset_attempted = True
             if hasattr(client, "_auto_enable_pairing_agent"):
                 client._auto_enable_pairing_agent = True
+        if adapter_deaf_streak >= 1 and hasattr(client, "_direct_connect"):
+            client._direct_connect = False
+            logger.info("Skipping direct connect probe after 0-packet scan; checking RX via scan...")
         failure: Optional[BaseException] = None
         was_authenticated = False
         try:
             await client.connect_and_authenticate(scan_timeout=scan_timeout)
             was_authenticated = True
             unresolved_drop_streak = 0
+            adapter_deaf_streak = 0
             succeeded_sessions += 1
             consecutive_failures = 0
             if duration is not None and collection_deadline is None:
@@ -219,6 +234,23 @@ async def run_monitor(
             failure = exc
             last_failure = exc
             logger.error("Session %d failed: %s", attempt, describe_ble_error(exc))
+            if isinstance(exc, AdapterDeafError):
+                adapter_deaf_streak += 1
+                if deaf_limit > 0 and succeeded_sessions == 0 and adapter_deaf_streak >= deaf_limit:
+                    drop_note = f" (saw {unresolved_drop_streak} unresolved drop(s) earlier)" if unresolved_drop_streak > 0 else ""
+                    logger.error(
+                        "Aborting after %d consecutive 0-packet scans%s; reset USB adapter and bluetoothd.",
+                        adapter_deaf_streak,
+                        drop_note,
+                    )
+                    raise
+                if succeeded_sessions > 0 and adapter_deaf_streak >= 2:
+                    logger.error(
+                        "Adapter saw 0 BLE packets for %d consecutive scans since disconnect; USB reset may be needed.",
+                        adapter_deaf_streak,
+                    )
+            else:
+                adapter_deaf_streak = 0
         finally:
             if was_authenticated and failure is not None:
                 handle_workout_disconnected(workout, hub=hub)

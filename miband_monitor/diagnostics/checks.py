@@ -6,6 +6,7 @@ permissions of the local .env file and format identifiers for display.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 from typing import Optional
@@ -61,6 +62,17 @@ def _mask(identifier: str) -> str:
     return text[-4:].rjust(len(text), "*") if text else ""
 
 
+def _read_usb_hex_id(path: Path) -> Optional[str]:
+    """Read a lowercase 4-hex USB sysfs ID file without any 0x prefix."""
+    try:
+        raw = path.read_text(encoding="utf-8").strip().lower()
+    except OSError:
+        return None
+    if raw.startswith("0x"):
+        raw = raw[2:]
+    return raw or None
+
+
 def inspect_usb_autosuspend(
     adapter_name: str = "hci0",
     *,
@@ -98,6 +110,9 @@ def inspect_usb_autosuspend(
     except OSError:
         delay_ms = "unknown"
 
+    vendor_id = _read_usb_hex_id(usb_node / "idVendor")
+    product_id = _read_usb_hex_id(usb_node / "idProduct")
+
     risky = False
     if control == "auto":
         try:
@@ -106,9 +121,63 @@ def inspect_usb_autosuspend(
             risky = True
 
     return {
+        "adapter": adapter_name,
         "usb_device": usb_node.name,
         "control": control,
         "delay_ms": delay_ms,
         "risky": risky,
         "power_dir": str(power_dir),
+        "vendor_id": vendor_id,
+        "product_id": product_id,
     }
+
+
+def format_usb_autosuspend_hint(usb_power: dict) -> str:
+    """Format actionable temporary and persistent USB autosuspend mitigation hints."""
+    hint = f"Disable temporarily: echo on | sudo tee {usb_power['power_dir']}/control"
+    vid = usb_power.get("vendor_id")
+    pid = usb_power.get("product_id")
+    if vid and pid:
+        hint += (
+            f" | udev rule: ACTION==\"add\", SUBSYSTEM==\"usb\", "
+            f"ATTR{{idVendor}}==\"{vid}\", ATTR{{idProduct}}==\"{pid}\", "
+            f"TEST==\"power/control\", ATTR{{power/control}}=\"on\""
+        )
+    return hint
+
+
+def warn_usb_autosuspend_preflight(
+    log: logging.Logger,
+    *,
+    sysfs_bluetooth_root: Path = Path("/sys/class/bluetooth"),
+) -> list[dict]:
+    """Warn before long runs when any Linux USB Bluetooth adapter enables autosuspend."""
+    if not sysfs_bluetooth_root.is_dir():
+        return []
+    try:
+        adapters = sorted(
+            p.name for p in sysfs_bluetooth_root.iterdir() if p.name.startswith("hci")
+        )
+    except OSError:
+        return []
+
+    risky_nodes: list[dict] = []
+    for adapter_name in adapters:
+        usb_power = inspect_usb_autosuspend(
+            adapter_name,
+            sysfs_bluetooth_root=sysfs_bluetooth_root,
+        )
+        if usb_power is None or not usb_power.get("risky"):
+            continue
+        risky_nodes.append(usb_power)
+        log.warning(
+            "USB Bluetooth adapter %s (%s) has autosuspend enabled "
+            "(power/control=%s, autosuspend_delay_ms=%s), which can drop or "
+            "wedge long workout links. %s",
+            adapter_name,
+            usb_power["usb_device"],
+            usb_power["control"],
+            usb_power["delay_ms"],
+            format_usb_autosuspend_hint(usb_power),
+        )
+    return risky_nodes

@@ -63,6 +63,7 @@ async def wait_for_bluez_link(
         "info": None,
         "attempts": 0,
         "dropped_unresolved": 0,
+        "unresolved_drop_durations": [],
         "errors": [],
     }
     if not platform.is_bluez_platform():
@@ -80,6 +81,7 @@ async def wait_for_bluez_link(
     attempts = 0
     consecutive_errors = 0
     dropped_unresolved = 0
+    drop_durations: list[float] = []
     connected_since: Optional[float] = None
     grace_applied = False
     errors: list[str] = []
@@ -92,6 +94,7 @@ async def wait_for_bluez_link(
         outcome["info"] = info
         outcome["attempts"] = attempts
         outcome["dropped_unresolved"] = dropped_unresolved
+        outcome["unresolved_drop_durations"] = drop_durations
         outcome["errors"] = errors
         return outcome
 
@@ -148,6 +151,7 @@ async def wait_for_bluez_link(
                 elapsed = loop.time() - connected_since
                 connected_since = None
                 dropped_unresolved += 1
+                drop_durations.append(round(elapsed, 2))
                 logger.info(
                     "BlueZ link to %s dropped after %.2fs before services resolved "
                     "(attempt %d; stale LTK/bond or band timeout).",

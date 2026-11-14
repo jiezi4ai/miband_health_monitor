@@ -40,11 +40,11 @@ Module-level details are in [modules/](modules/).
 | Layer | Package | Rule |
 |---|---|---|
 | Infrastructure | [config](../miband_monitor/config/), [crypto](../miband_monitor/crypto/), [bluez](../miband_monitor/bluez/) | Does not import domain packages; config uses only the standard library; crypto/bluez can stay independent of each other |
-| Domain services | [ble](../miband_monitor/ble/), [history](../miband_monitor/history/), [storage](../miband_monitor/storage/), [dashboard](../miband_monitor/dashboard/), [sleep](../miband_monitor/sleep/), [offline_dashboard](../miband_monitor/offline_dashboard/), [reports](../miband_monitor/reports/), [simulator](../miband_monitor/simulator/) | Depends only downward on infrastructure; the analysis packages (sleep / offline_dashboard) do not start threads or use the network |
+| Domain services | [ble](../miband_monitor/ble/), [history](../miband_monitor/history/), [storage](../miband_monitor/storage/), [dashboard](../miband_monitor/dashboard/), [sleep](../miband_monitor/sleep/), [workout](../miband_monitor/workout/), [offline_dashboard](../miband_monitor/offline_dashboard/), [reports](../miband_monitor/reports/), [simulator](../miband_monitor/simulator/) | Depends only downward on infrastructure; the analysis and workout-computation packages (sleep / workout / offline_dashboard) do not start threads or use the network |
 | Orchestration layer | [cli](../miband_monitor/cli/), [diagnostics](../miband_monitor/diagnostics/), [auth](../miband_monitor/auth/) plus the root `tools/` scripts | May depend on any domain package; responsible for arguments, interaction, lifecycle and exit codes |
 
-**The dependency direction must be one-way**: `cli → {ble, history, storage, dashboard, simulator, diagnostics}`,
-`ble → {bluez, crypto, config}`, `history → config`, `simulator → {ble, history}`.
+**The dependency direction must be one-way**: `cli → {ble, history, storage, dashboard, workout, simulator, diagnostics}`,
+`ble → {bluez, crypto, config}`, `history → config`, `workout → config`, `simulator → {ble, history}`.
 Domain packages are forbidden to import `cli` in reverse, and `config` is forbidden to import other
 project packages.
 
@@ -91,14 +91,15 @@ data/mi_band.db ──> reports.history      → text / JSON summary
 | config | defaults / env / paths / privacy / security / health / demo | [modules/config.md](modules/config.md) |
 | crypto | constants / native / pure_python / facade | [modules/crypto.md](modules/crypto.md) |
 | bluez | constants / platform / dbus / devices / admin / link / pairing / mtu / scanner / errors | [modules/bluez.md](modules/bluez.md) |
-| ble | protocol / parsers / identity / crypto / chunked / backends / discovery / link / mtu / listener / auth_* / notifications / streams / client | [modules/ble.md](modules/ble.md) |
+| ble | protocol / battery / parsers / identity / crypto / chunked / backends / discovery / link / mtu / listener / auth_* / notifications / streams / client | [modules/ble.md](modules/ble.md) |
 | history | protocol / models / parsers / fetcher / sync | [modules/history.md](modules/history.md) |
 | storage | schema / store / writer / sqlite / readers / export_csv | [modules/storage.md](modules/storage.md) |
 | dashboard | constants / history / hub / http / page / server + assets | [modules/dashboard.md](modules/dashboard.md) |
+| workout | constants / metrics / snapshot / session | [miband_monitor/workout](../miband_monitor/workout/) |
 | sleep | constants / samples / scoring / detection / classification / session / report / cli / calibration | [modules/sleep.md](modules/sleep.md) |
 | offline_dashboard | constants / strings / sources / collect / packaging / kpis / svg / render / cli + assets | [modules/offline-dashboard.md](modules/offline-dashboard.md) |
 | simulator | constants / payloads / devices / band / history / auth / streams / fake_bleak / factory | [modules/simulator.md](modules/simulator.md) |
-| cli | args / app / callbacks / logging / runner | [modules/cli.md](modules/cli.md) |
+| cli | args / app / callbacks / logging / runner / demo_runner / workout_runner | [modules/cli.md](modules/cli.md) |
 | diagnostics | report / checks / doctor / scanning / live_scan | [modules/diagnostics.md](modules/diagnostics.md) |
 | reports | history | [modules/reports.md](modules/reports.md) |
 | auth | constants / extractor / token | [modules/auth.md](modules/auth.md) |

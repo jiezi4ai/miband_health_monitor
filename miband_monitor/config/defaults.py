@@ -33,6 +33,7 @@ ENV_BLUEZ_TRUST = "MIBAND_BLUEZ_TRUST"
 ENV_BLUEZ_AGENT = "MIBAND_BLUEZ_AGENT"
 ENV_BLUEZ_DUPLICATE_DATA = "MIBAND_BLUEZ_DUPLICATE_DATA"
 ENV_SMP_SETTLE_DELAY = "MIBAND_SMP_SETTLE_DELAY"
+ENV_ADAPTER_DEAF_LIMIT = "MIBAND_ADAPTER_DEAF_LIMIT"
 
 # ---------------------------------------------------------------------------
 # Paths and CLI defaults
@@ -75,6 +76,12 @@ DEFAULT_SCAN_HEARTBEAT_SECONDS = 5.0
 #: Seconds of complete radio silence after which the scan warns about a wedged
 #: USB adapter (measured on the BARROT BT 6.0 adapter).
 DEFAULT_SCAN_SILENCE_WARNING_SECONDS = 25
+#: Pre-services drop duration (seconds) strongly indicative of a stale BlueZ
+#: LTK rather than a slow handle-enumeration timeout (~9 s on Mi Band 6).
+DEFAULT_STALE_BOND_FAST_DROP_SECONDS = 6.0
+#: Consecutive zero-packet BLE scans before pre-connection monitoring aborts
+#: early instead of spinning on a deaf USB adapter (0 disables early abort).
+DEFAULT_ADAPTER_DEAF_LIMIT = 2
 
 # ---------------------------------------------------------------------------
 # Web dashboard defaults

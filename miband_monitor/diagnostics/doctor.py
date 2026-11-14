@@ -30,7 +30,13 @@ from miband_monitor.config.defaults import (
 from miband_monitor.crypto import backend_name as ecdh_backend_name
 from miband_monitor.crypto import native_library_candidates
 
-from .checks import _bleak_version, _env_mode_hint, _mask, inspect_usb_autosuspend
+from .checks import (
+    _bleak_version,
+    _env_mode_hint,
+    _mask,
+    format_usb_autosuspend_hint,
+    inspect_usb_autosuspend,
+)
 from .report import FAIL, INFO, OK, WARN, _Report
 
 
@@ -169,9 +175,7 @@ async def _check_bluez(report: _Report, device_id: str) -> None:
                 f"power/control={usb_power['control']} "
                 f"autosuspend_delay_ms={usb_power['delay_ms']}; brief idle pauses "
                 "during long workouts may suspend the Bluetooth controller",
-                hint=(
-                    f"Disable temporarily: echo on | sudo tee {usb_power['power_dir']}/control"
-                ),
+                hint=format_usb_autosuspend_hint(usb_power),
             )
         else:
             report.add(

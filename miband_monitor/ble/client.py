@@ -156,6 +156,7 @@ class MiBand6Client(
         self._unresolved_drops = 0
         self._stale_bond_reset_attempted = False
         self._auto_enable_pairing_agent = False
+        self._last_scan_stats: Optional[dict[str, float | int]] = None
 
     # ------------------------------------------------------------- properties
     @property

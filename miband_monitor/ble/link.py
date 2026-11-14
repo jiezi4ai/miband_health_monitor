@@ -23,6 +23,11 @@ from typing import Any
 
 from .. import bluez
 from ..config.defaults import DEFAULT_DIRECT_CONNECT_TIMEOUT
+from .bluez_recovery import (
+    clear_stale_bond_and_start_agent,
+    compute_scan_budget,
+    handle_bluez_standby_failure,
+)
 
 logger = logging.getLogger("MiBand6Client")
 
@@ -134,31 +139,7 @@ class LinkMixin:
 
     async def _recover_from_stale_bond(self) -> bool:
         """Clear a bonded BlueZ object after consecutive pre-service drops and arm pairing."""
-        if getattr(self, "_stale_bond_reset_attempted", False):
-            return False
-        if await bluez.paired_device(self.device_id) is None:
-            return False
-        self._stale_bond_reset_attempted = True
-        logger.warning(
-            "Detected %d consecutive unresolved BlueZ drops on bonded device %s "
-            "(likely stale LTK); clearing cached BlueZ bond and enabling pairing "
-            "agent for clean re-pair.",
-            self._unresolved_drops,
-            self.device_id,
-        )
-        if not await bluez.remove_device(self.device_id):
-            logger.warning("Could not remove stale BlueZ bond for %s.", self.device_id)
-            return False
-        self._trusted_paths.clear()
-        self._reused_bluez_link = False
-        self._auto_enable_pairing_agent = True
-        if self._pairing_agent is None:
-            agent = bluez.BlueZPairingAgent(self.device_id)
-            if await agent.start():
-                self._pairing_agent = agent
-            else:
-                logger.debug("BlueZ pairing agent failed to start during stale-bond recovery.")
-        return True
+        return await clear_stale_bond_and_start_agent(self)
 
     async def _open_bluez_link(self, direct_device, scan_timeout: float, connect_timeout: float) -> None:
         """Keep one BlueZ Connect armed until the band answers its next pulse.
@@ -187,11 +168,19 @@ class LinkMixin:
         # extra D-Bus roundtrip before arming Device1.Connect.
         await self._ensure_bluez_ready(direct_device)
         phases = ["direct", "scan"] if direct_device is not None else ["scan"]
+        post_reset_scan = False
         while phases:
             phase = phases.pop(0)
             if phase == "scan":
                 remaining = deadline - time.monotonic()
-                if remaining < 12.0:
+                scan_budget = compute_scan_budget(
+                    remaining,
+                    scan_timeout,
+                    bluez.BAND_PULSE_PERIOD,
+                    post_reset=post_reset_scan,
+                )
+                post_reset_scan = False
+                if scan_budget is None:
                     break
                 logger.info(
                     "Waiting for the band's next broadcast pulse at %s...",
@@ -200,7 +189,6 @@ class LinkMixin:
                 # Give discovery a full pulse period (capped by scan_timeout) even
                 # after a direct probe; wait_for_bluez_link below gets its own
                 # BAND_PULSE_PERIOD standby window once a pulse arrives.
-                scan_budget = max(remaining, min(float(scan_timeout), bluez.BAND_PULSE_PERIOD))
                 scan_deadline = time.monotonic() + scan_budget
                 device = await self._discover_device(scan_timeout, deadline=scan_deadline)
             remaining = deadline - time.monotonic()
@@ -219,6 +207,7 @@ class LinkMixin:
             details = getattr(device, "details", None)
             dev_path = details.get("path") if isinstance(details, dict) else None
             link_kwargs = {"device_path": dev_path} if dev_path else {}
+            prior_drops = int(getattr(self, "_unresolved_drops", 0) or 0)
             outcome = await bluez.wait_for_bluez_link(
                 self.device_id, timeout=max(3.0, slice_timeout), **link_kwargs
             )
@@ -232,23 +221,18 @@ class LinkMixin:
                     outcome["attempts"],
                     detail,
                 )
-                drops = int(outcome.get("dropped_unresolved", 0) or 0)
-                if drops > 0:
-                    self._unresolved_drops += drops
-                    if self._unresolved_drops >= 2 and await self._recover_from_stale_bond():
-                        direct_device = None
-                        device = None
-                        self._unresolved_drops = 0
-                        await asyncio.sleep(0.3)
-                        if "scan" not in phases and (deadline - time.monotonic()) >= 12.0:
-                            phases.append("scan")
-                    else:
-                        logger.warning(
-                            "Link dropped before ServicesResolved (common when BlueZ holds a "
-                            "stale LTK after re-pairing elsewhere). Clear the cached bond "
-                            "with `bluetoothctl remove <MAC>` and reconnect with "
-                            "`MIBAND_BLUEZ_AGENT=1`."
-                        )
+                recovered, deadline = await handle_bluez_standby_failure(
+                    self,
+                    outcome,
+                    prior_drops=prior_drops,
+                    scan_timeout=scan_timeout,
+                    deadline=deadline,
+                    phases=phases,
+                )
+                if recovered:
+                    direct_device = None
+                    device = None
+                    post_reset_scan = True
                 continue
             self._unresolved_drops = 0
             info = outcome["info"] or {}

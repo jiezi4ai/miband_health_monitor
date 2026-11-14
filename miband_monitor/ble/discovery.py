@@ -34,6 +34,19 @@ from .identity import device_matches
 logger = logging.getLogger("MiBand6Client")
 
 
+class AdapterDeafError(TimeoutError):
+    """Raised when a BLE scan sees zero packets from any device across the window.
+
+    This inherits from :class:`TimeoutError` for backwards compatibility while
+    allowing supervisors to detect a hardware-wedged USB controller (such as the
+    BARROT 33fa:0012 after an aborted connect).
+    """
+
+    def __init__(self, message: str, *, silence_seconds: float = 0.0) -> None:
+        super().__init__(message)
+        self.silence_seconds = float(silence_seconds)
+
+
 class DiscoveryMixin:
     """Scanning, direct-connect selection and BlueZ trust bookkeeping."""
 
@@ -168,6 +181,16 @@ class DiscoveryMixin:
             try:
                 await asyncio.wait_for(stop_event.wait(), timeout=wait_for)
             except asyncio.TimeoutError:
+                total_packets = stats.get("band", 0) + stats.get("other", 0)
+                if total_packets == 0 and wait_for >= DEFAULT_SCAN_SILENCE_WARNING_SECONDS:
+                    raise AdapterDeafError(
+                        f"Bluetooth adapter received 0 BLE packets from ANY device over "
+                        f"{wait_for:.0f}s while scanning for {self._describe_target()}. "
+                        "On Linux (especially BARROT 33fa:0012), the USB radio state machine "
+                        "may be wedged: run `sudo usbreset 33fa:0012` (or unplug/replug) "
+                        "and `sudo systemctl restart bluetooth`, then retry.",
+                        silence_seconds=wait_for,
+                    ) from None
                 raise TimeoutError(
                     f"Could not discover band {self._describe_target()} "
                     f"within {wait_for:.0f}s. "
@@ -186,6 +209,11 @@ class DiscoveryMixin:
                     self._describe_target(),
                 )
         finally:
+            self._last_scan_stats = {
+                "band": int(stats.get("band", 0)),
+                "other": int(stats.get("other", 0)),
+                "wait_for": float(wait_for),
+            }
             heartbeat.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat

@@ -257,3 +257,21 @@ More diagnostic tools are described in [../tools/README.md](../../tools/README.m
 .venv\Scripts\python.exe history_report.py --hours 24
 .venv\Scripts\python.exe scan_ble.py
 ```
+
+## 10. Workout keep-alive mode (`--workout`) and the watchdog
+
+A closed-loop capture and disconnect-recovery flow for sustained workouts of 10–60+ minutes:
+
+```bash
+# Real-device workout mode (1 Hz live heart rate + 0x0007 incremental steps/calories + Z1-Z5 zones + live dashboard)
+.venv/bin/python miband_client.py --workout --age 28 --weight 68 --sex male --web-port 8080 --export-csv
+
+# 4-second simulator end-to-end demo (no hardware)
+.venv/bin/python miband_client.py --demo 4 --workout --web-port 0 --output /tmp/miband-workout-demo --export-csv
+```
+
+Key features:
+- **Dual-layer HR watchdog (enabled by default)**: in addition to the `0x16` keep-alive sent every 12 seconds, it watches for `0x2A37` notification silence (parseable frames such as `bpm=0`/`255` also refresh the heartbeat timestamp); after 24 seconds of silence it sends a Tier-1 soft re-arm `0x15 0x01 0x01` (at most 2 times), and beyond 48 seconds it triggers a Tier-2 link drop and fast reconnect (0.3 s). The thresholds can be tuned with `--hr-silence-soft` / `--hr-silence-hard`.
+- **Disconnect recovery and targeted gap fill**: when the reconnect outage exceeds `--gap-fill-min` (default 60 s), the client incrementally fetches the `ACTIVITY (0x01)` minute data for that window **before** starting the live streams and writes it into the de-duplicated `activity_history` (never into the raw `heart_rate` table); it is then merged seamlessly into the in-memory and dashboard timeline.
+- **Net increments and physiological estimates**: using the first `0x0007` frame as the workout-start baseline, it computes net steps, net distance and band net calories (including midnight-reset detection), and additionally provides a Keytel (2005) heart-rate calorie estimate plus the Z1–Z5 heart-rate zone time distribution from age/weight/sex; at the end it generates `workout_summary.json`.
+- **Optional battery and host sleep-prevention diagnostics**: with `--workout` enabled, it conservatively reads the standard `0x2A19` battery level every `--battery-interval` (default 300 s; automatically skipped when unsupported); on Linux, `--doctor` also performs a read-only check of the Bluetooth USB controller's `autosuspend` state.
