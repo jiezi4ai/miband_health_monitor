@@ -10,10 +10,11 @@ writer that fills the database.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, tzinfo
 from pathlib import Path
 from typing import Optional
 
+from miband_monitor.history.protocol import resolve_band_tz
 from miband_monitor.storage.schema import ACTIVITY_HISTORY_COLUMNS, ACTIVITY_HISTORY_TABLE
 
 from .constants import (
@@ -89,6 +90,11 @@ def is_awake(sample: dict) -> bool:
     return int(sample.get("steps", 0)) >= AWAKE_STEPS
 
 
+def is_still_minute(sample: dict) -> bool:
+    """True when the band is worn and shows neither steps nor body movement."""
+    return not is_nonwear(sample.get("kind", 0)) and not is_movement(sample)
+
+
 def is_asleep_minute(sample: dict) -> bool:
     """True when this minute belongs in a sleep session: still, and worn.
 
@@ -108,12 +114,14 @@ def usable_heart_rate(sample: dict) -> Optional[int]:
     return value
 
 
-def local_iso(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp).isoformat(timespec="minutes")
+def local_iso(timestamp: float, *, tz: Optional[str | tzinfo] = None) -> str:
+    """Format *timestamp* as ``YYYY-MM-DDTHH:MM`` in *tz* (or ``BAND_TZ`` / host)."""
+    return datetime.fromtimestamp(timestamp, tz=resolve_band_tz(tz)).strftime("%Y-%m-%dT%H:%M")
 
 
-def local_date(timestamp: float) -> str:
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+def local_date(timestamp: float, *, tz: Optional[str | tzinfo] = None) -> str:
+    """Format *timestamp* as ``YYYY-MM-DD`` in *tz* (or ``BAND_TZ`` / host)."""
+    return datetime.fromtimestamp(timestamp, tz=resolve_band_tz(tz)).strftime("%Y-%m-%d")
 
 
 # ---------------------------------------------------------------------------

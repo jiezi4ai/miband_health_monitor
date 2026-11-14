@@ -107,3 +107,34 @@ def test_a_lone_anchor_minute_cannot_create_a_night():
     samples += [sample(30, kind=240, hr=60)]
     samples += [sample(31 + i, kind=80, hr=70, steps=0) for i in range(60)]
     assert detect_sessions(samples) == []
+
+
+def test_extension_stops_at_sustained_movement():
+    """Morning getting up with high intensity stops extension despite lone idle minutes."""
+    night = series(40)
+    morning_active = [sample(40 + i, kind=80, hr=90, intensity=65) for i in range(15)]
+    morning_active[6]["intensity"] = 10  # single isolated idle minute during activity
+    sitting_later = series(30, start=55, kind=80, hr=70, intensity=0)
+    sessions = detect_sessions(night + morning_active + sitting_later)
+    assert len(sessions) == 1
+    assert len(sessions[0]) == 40
+
+
+def test_extension_bridges_short_rollover_into_sustained_stillness():
+    """A 2-minute turn-over bridges into subsequent stillness, then stops at walking."""
+    night = series(40)
+    rollover = [sample(40 + i, kind=80, hr=55, intensity=30) for i in range(2)]
+    post_still = series(15, start=42, kind=80, hr=52, intensity=5)
+    walking = [sample(57 + i, kind=1, hr=95, steps=30, intensity=80) for i in range(10)]
+    sessions = detect_sessions(night + rollover + post_still + walking)
+    assert len(sessions) == 1
+    assert len(sessions[0]) == 57
+
+
+def test_trailing_step_anchor_is_trimmed():
+    """Step-bearing edge anchors right before daytime activity are trimmed."""
+    night = series(30) + [sample(30, kind=240, steps=6, intensity=85), sample(31, kind=240, steps=8, intensity=88)]
+    walking = [sample(32 + i, kind=1, hr=95, steps=20, intensity=75) for i in range(15)]
+    sessions = detect_sessions(night + walking)
+    assert len(sessions) == 1
+    assert len(sessions[0]) == 30

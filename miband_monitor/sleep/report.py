@@ -8,13 +8,15 @@ stage minutes (it is evidence, not a stage mapping).
 
 from __future__ import annotations
 
-from datetime import datetime
-from typing import Any
+from datetime import datetime, tzinfo
+from typing import Any, Optional
+
+from miband_monitor.history.protocol import resolve_band_tz
 
 from .constants import MINUTE, STAGE_AWAKE, STAGE_DEEP, STAGE_LIGHT
 
 
-def _format_report(result: dict[str, Any]) -> str:
+def _format_report(result: dict[str, Any], *, tz: Optional[str | tzinfo] = None) -> str:
     lines = []
     totals = result["totals"]
     not_worn = result.get("not_worn") or []
@@ -84,8 +86,9 @@ def _format_report(result: dict[str, Any]) -> str:
             )
         hypnogram = session.hypnogram()
         lines.append(f"    hypnogram ({len(hypnogram)} min):")
+        clock_tz = resolve_band_tz(session.tz if session.tz is not None else tz)
         for offset in range(0, len(hypnogram), 60):
-            clock = datetime.fromtimestamp(session.start + offset * MINUTE).strftime("%H:%M")
+            clock = datetime.fromtimestamp(session.start + offset * MINUTE, tz=clock_tz).strftime("%H:%M")
             lines.append(f"      {clock} {hypnogram[offset:offset + 60]}")
     lines.append("")
     lines.append("  legend: '.' awake  '-' light  '=' deep  '~' rem   (derived, not band-reported)")

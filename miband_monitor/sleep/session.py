@@ -10,8 +10,8 @@ started -- the way Zepp Life labels them.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
-from typing import Any, Sequence
+from datetime import datetime, tzinfo
+from typing import Any, Optional, Sequence
 
 from .classification import classify_session
 from .constants import STAGE_AWAKE, STAGE_DEEP, STAGE_LIGHT, STAGE_UNKNOWN, STAGES
@@ -33,6 +33,7 @@ class SleepSession:
     samples: list[dict] = field(default_factory=list, repr=False)
     stages: list[str] = field(default_factory=list, repr=False)
     band_scores: dict = field(default_factory=dict, repr=False)
+    tz: Optional[str | tzinfo] = field(default=None, repr=False)
 
     @property
     def slept_minutes(self) -> int:
@@ -54,8 +55,8 @@ class SleepSession:
         unknown = self.stage_minutes.get(STAGE_UNKNOWN, 0)
         return {
             "derived": True,
-            "start": local_iso(self.start),
-            "end": local_iso(self.end),
+            "start": local_iso(self.start, tz=self.tz),
+            "end": local_iso(self.end, tz=self.tz),
             "start_ts": self.start,
             "end_ts": self.end,
             "minutes_in_bed": self.minutes,
@@ -104,7 +105,9 @@ def _longest_sleep_run(stages: Sequence[str]) -> int:
     return best
 
 
-def build_session(samples: Sequence[dict]) -> SleepSession:
+def build_session(
+    samples: Sequence[dict], *, tz: Optional[str | tzinfo] = None
+) -> SleepSession:
     stages = classify_session(samples)
     stage_minutes: dict[str, int] = {}
     for stage in stages:
@@ -119,17 +122,20 @@ def build_session(samples: Sequence[dict]) -> SleepSession:
         samples=list(samples),
         stages=stages,
         band_scores=score_estimates(samples),
+        tz=tz,
     )
 
 
-def analyze(samples: Sequence[dict]) -> dict[str, Any]:
+def analyze(
+    samples: Sequence[dict], *, tz: Optional[str | tzinfo] = None
+) -> dict[str, Any]:
     """Run session detection plus staging over a full sample list."""
-    sessions = [build_session(session) for session in detect_sessions(samples)]
+    sessions = [build_session(session, tz=tz) for session in detect_sessions(samples)]
     nights: dict[str, list[SleepSession]] = {}
     for session in sessions:
         # A night belongs to the date you went to sleep on -- that is how Zepp
         # Life labels the page (a 22:06-05:55 session is "1 月 6 日", not 7).
-        nights.setdefault(local_date(session.start), []).append(session)
+        nights.setdefault(local_date(session.start, tz=tz), []).append(session)
 
     totals = {
         "sessions": len(sessions),
@@ -143,10 +149,10 @@ def analyze(samples: Sequence[dict]) -> dict[str, Any]:
     }
     return {
         "derived": True,
-        "generated_at": local_iso(datetime.now().timestamp()),
+        "generated_at": local_iso(datetime.now().timestamp(), tz=tz),
         "totals": totals,
         "sessions": [s.as_dict() for s in sessions],
-        "not_worn": detect_nonwear_spans(samples),
+        "not_worn": detect_nonwear_spans(samples, tz=tz),
         "nights": {
             date: [s.as_dict() for s in items] for date, items in sorted(nights.items())
         },

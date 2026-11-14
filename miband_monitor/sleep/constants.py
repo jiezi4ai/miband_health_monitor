@@ -66,6 +66,13 @@ AWAKE_STEPS = 1
 #: Quiet gaps up to this long are bridged inside one sleep session (a mid-night
 #: wake-up of a few minutes should not split the night in two).
 SESSION_GAP_MINUTES = 20
+#: Outward session-boundary extension (past the band's sleep anchors) bridges
+#: brief roll-over movement up to this many minutes when sustained stillness
+#: follows, preventing active sitting or morning walking from being swallowed.
+EXTENSION_GAP_MINUTES = 5
+#: Minimum consecutive still minutes required on the far side of a movement
+#: gap during outward extension, so one isolated idle minute does not trigger.
+MIN_STILL_LANDING = 2
 #: Sessions shorter than this are discarded as naps/artefacts.
 MIN_SESSION_MINUTES = 20
 #: How far a session may grow beyond the band's own "sleep" state, in minutes.

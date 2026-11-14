@@ -73,3 +73,26 @@ def test_cli_says_not_worn_instead_of_inventing_a_night(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "no sleep session detected" in out
     assert "band not worn" in out
+
+
+def test_cli_band_tz_formats_in_requested_timezone(tmp_path, capsys):
+    import json
+    from datetime import datetime, timezone
+
+    # 2026-11-13 22:24 Asia/Shanghai == 2026-11-13 14:24 UTC.
+    utc_start = datetime(2026, 11, 13, 14, 24, tzinfo=timezone.utc).timestamp()
+    rows = [
+        {"ts": utc_start + i * 60, "kind": 240, "intensity": 0, "steps": 0, "heart_rate": 52}
+        for i in range(60)
+    ]
+    db = _seed_database(tmp_path, rows)
+    assert main(["--db", str(db), "--band-tz", "Asia/Shanghai", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["sessions"][0]["start"] == "2026-11-13T22:24"
+    assert len(payload["sessions"][0]["start"]) == 16
+    assert "2026-11-13" in payload["nights"]
+
+
+def test_cli_invalid_band_tz_returns_error(tmp_path):
+    db = _seed_database(tmp_path, series(30))
+    assert main(["--db", str(db), "--band-tz", "Not/Real"]) == 1

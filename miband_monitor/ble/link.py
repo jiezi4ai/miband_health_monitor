@@ -203,6 +203,13 @@ class LinkMixin:
                     outcome["attempts"],
                     detail,
                 )
+                if outcome.get("dropped_unresolved", 0) > 0:
+                    logger.warning(
+                        "Link dropped before ServicesResolved (common when BlueZ holds a "
+                        "stale LTK after re-pairing elsewhere). Clear the cached bond "
+                        "with `bluetoothctl remove <MAC>` and reconnect with "
+                        "`MIBAND_BLUEZ_AGENT=1`."
+                    )
                 continue
             info = outcome["info"] or {}
             ble_device = bluez.make_ble_device(info) or device

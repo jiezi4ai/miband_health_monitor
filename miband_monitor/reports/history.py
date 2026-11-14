@@ -17,11 +17,12 @@ import json
 import sqlite3
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, tzinfo
 from pathlib import Path
 
 from ..config.health import HR_MAX, HR_MIN
 from ..config.paths import default_db_path
+from ..history.protocol import resolve_band_tz
 from ..storage.readers import table_exists
 from ..storage.schema import (
     ACTIVITY_HISTORY_TABLE,
@@ -46,19 +47,54 @@ def _scalar(conn: sqlite3.Connection, query: str, params: tuple = ()):
     return row[0] if row else None
 
 
-def summarize(db_path: str | Path, hours: float = 24.0, now: float | None = None) -> dict:
+def _daily_activity(conn: sqlite3.Connection, since: float, band_tz: tzinfo) -> list[dict]:
+    """Aggregate activity_history minutes, steps, and usable HR per local calendar date."""
+    buckets: dict[str, list[int]] = {}
+    rows = conn.execute(
+        f"SELECT ts, steps, heart_rate FROM {ACTIVITY_HISTORY_TABLE} "
+        "WHERE ts >= ? ORDER BY ts",
+        (since,),
+    ).fetchall()
+    for ts, steps, heart_rate in rows:
+        day = datetime.fromtimestamp(float(ts), tz=band_tz).strftime("%Y-%m-%d")
+        entry = buckets.setdefault(day, [0, 0, 0, 0])
+        entry[0] += 1
+        entry[1] += int(steps or 0)
+        if heart_rate is not None and HR_MIN <= int(heart_rate) <= HR_MAX:
+            entry[2] += int(heart_rate)
+            entry[3] += 1
+    return [
+        {
+            "date": day,
+            "minutes": mins,
+            "steps": total_steps,
+            "avg_heart_rate": round(hr_sum / hr_cnt, 1) if hr_cnt else None,
+        }
+        for day, (mins, total_steps, hr_sum, hr_cnt) in sorted(buckets.items())
+    ]
+
+
+def summarize(
+    db_path: str | Path,
+    hours: float = 24.0,
+    now: float | None = None,
+    *,
+    tz: str | tzinfo | None = None,
+) -> dict:
     """Build an aggregate summary of the last *hours* of stored telemetry."""
     path = Path(db_path)
     if not path.is_file():
         raise FileNotFoundError(f"SQLite database not found: {path}")
 
+    band_tz = resolve_band_tz(tz)
     now_ts = time.time() if now is None else float(now)
     since = now_ts - max(0.0, float(hours)) * 3600.0
     summary: dict = {
         "db": str(path),
         "window_hours": float(hours),
         "since": round(since, 3),
-        "since_iso": datetime.fromtimestamp(since).astimezone().isoformat(timespec="seconds"),
+        "since_iso": datetime.fromtimestamp(since, tz=band_tz).isoformat(timespec="seconds"),
+        "timezone": str(band_tz),
         "tables": {},
     }
 
@@ -143,6 +179,7 @@ def summarize(db_path: str | Path, hours: float = 24.0, now: float | None = None
                 "minutes": int(count or 0),
                 "total_steps": int(total_steps or 0),
                 "avg_heart_rate": round(avg_hr, 1) if avg_hr is not None else None,
+                "daily": _daily_activity(conn, since, band_tz),
             }
     finally:
         conn.close()
@@ -183,6 +220,12 @@ def format_report(summary: dict) -> str:
             f"{activity['total_steps']} steps"
             + (f", avg HR {avg_hr} BPM" if avg_hr is not None else "")
         )
+        for day in activity.get("daily") or []:
+            day_hr = day.get("avg_heart_rate")
+            lines.append(
+                f"    {day['date']}: {day['steps']} steps ({day['minutes']} min"
+                + (f", avg HR {day_hr} BPM)" if day_hr is not None else ")")
+            )
     steps = tables.get(STEPS_TABLE)
     if steps and steps["count"]:
         latest = steps["latest"] or {}
@@ -204,12 +247,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Summarize locally stored Mi Band 6 telemetry.")
     parser.add_argument("--db", default=str(DEFAULT_DB), help="SQLite database path")
     parser.add_argument("--hours", type=float, default=24.0, help="time window in hours")
+    parser.add_argument(
+        "--band-tz",
+        default=None,
+        metavar="TZ",
+        help="band local timezone (default: BAND_TZ env or host local timezone)",
+    )
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = parser.parse_args(argv)
 
     try:
-        summary = summarize(args.db, hours=args.hours)
-    except (FileNotFoundError, sqlite3.Error) as exc:
+        summary = summarize(args.db, hours=args.hours, tz=args.band_tz)
+    except (FileNotFoundError, sqlite3.Error, ValueError) as exc:
         print(f"[-] {exc}", file=sys.stderr)
         return 1
 

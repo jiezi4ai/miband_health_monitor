@@ -35,7 +35,7 @@ _DBUS_HINTS = {
     ),
     "org.bluez.Error.AuthenticationFailed": (
         "pairing failed; remove the stale bond (bluetoothctl remove <MAC>) "
-        "and pair again."
+        "and reconnect with MIBAND_BLUEZ_AGENT=1."
     ),
     "org.bluez.Error.AuthenticationRejected": (
         "the band rejected the pairing request."

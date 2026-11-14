@@ -69,6 +69,9 @@ BAND_PULSE_PERIOD = 70.0
 #: and the built-in profile probes.  A GATT write issued inside that window
 #: blocks behind the single ATT queue for tens of seconds (measured: 56.8 s).
 SMP_SETTLE_DELAY = 1.5
+#: Extra grace seconds granted once when Connected=True at deadline so an
+#: active GATT service enumeration is not cut off mid-handshake.
+SERVICE_RESOLVE_GRACE = 10.0
 
 #: DuplicateData=true makes BlueZ re-arm the LE scan every ~5 s (31 HCI
 #: commands in 75 s on extend-advertising controllers), which wedged the

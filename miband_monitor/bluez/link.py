@@ -26,6 +26,7 @@ from .constants import (
     DEVICE_IFACE,
     OBJECT_MANAGER_IFACE,
     OBJECT_MANAGER_PATH,
+    SERVICE_RESOLVE_GRACE,
     logger,
 )
 
@@ -61,6 +62,7 @@ async def wait_for_bluez_link(
         "reason": "not-bluez",
         "info": None,
         "attempts": 0,
+        "dropped_unresolved": 0,
         "errors": [],
     }
     if not platform.is_bluez_platform():
@@ -77,6 +79,9 @@ async def wait_for_bluez_link(
     deadline = loop.time() + max(1.0, float(timeout))
     attempts = 0
     consecutive_errors = 0
+    dropped_unresolved = 0
+    connected_since: Optional[float] = None
+    grace_applied = False
     errors: list[str] = []
     bus = None
     last_path: Optional[str] = None
@@ -86,6 +91,7 @@ async def wait_for_bluez_link(
         outcome["reason"] = reason
         outcome["info"] = info
         outcome["attempts"] = attempts
+        outcome["dropped_unresolved"] = dropped_unresolved
         outcome["errors"] = errors
         return outcome
 
@@ -136,10 +142,36 @@ async def wait_for_bluez_link(
                 outcome["ready"] = True
                 return _finish("resolved", info)
 
-            if loop.time() >= deadline:
-                return _finish(
-                    "services-timeout" if info["connected"] else "connect-timeout", info
+            if info["connected"] and connected_since is None:
+                connected_since = loop.time()
+            elif not info["connected"] and connected_since is not None:
+                elapsed = loop.time() - connected_since
+                connected_since = None
+                dropped_unresolved += 1
+                logger.info(
+                    "BlueZ link to %s dropped after %.2fs before services resolved "
+                    "(attempt %d; stale LTK/bond or band timeout).",
+                    address,
+                    elapsed,
+                    attempts,
                 )
+                errors.append(f"dropped-unresolved-after-{elapsed:.1f}s")
+
+            if loop.time() >= deadline:
+                if info["connected"] and not grace_applied:
+                    grace_applied = True
+                    deadline = loop.time() + SERVICE_RESOLVE_GRACE
+                    logger.info(
+                        "BlueZ link to %s connected near deadline; granting %.0fs "
+                        "grace for GATT service resolution.",
+                        address,
+                        SERVICE_RESOLVE_GRACE,
+                    )
+                else:
+                    return _finish(
+                        "services-timeout" if info["connected"] else "connect-timeout",
+                        info,
+                    )
 
             if info["connected"]:
                 # Link is up but BlueZ is still enumerating GATT: just wait, a

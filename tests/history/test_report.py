@@ -107,3 +107,42 @@ def test_cli_sync_history_argument():
     assert args.sync_history == 3
     args = parse_args(["--demo", "1"])
     assert args.sync_history is None
+
+
+def test_history_report_daily_breakdown_respects_band_tz(tmp_path):
+    from datetime import datetime, timezone
+    from history_report import main as report_main
+
+    def row(steps: int, hr: int) -> dict:
+        return {
+            "kind": 1,
+            "intensity": 20,
+            "steps": steps,
+            "heart_rate": hr,
+            "unknown1": 0,
+            "sleep": 0,
+            "deep_sleep": 0,
+            "rem_sleep": 0,
+        }
+
+    # 23:30+08:00 (15:30 UTC) vs 00:30+08:00 next day (16:30 UTC): both same UTC day,
+    # different Asia/Shanghai dates.
+    ts_day1 = datetime(2026, 11, 13, 15, 30, tzinfo=timezone.utc).timestamp()
+    ts_day2 = datetime(2026, 11, 13, 16, 30, tzinfo=timezone.utc).timestamp()
+    store = TelemetryStore(tmp_path, backend="sqlite")
+    try:
+        store.record_activity_history(row(120, 70), timestamp=ts_day1)
+        store.record_activity_history(row(250, 80), timestamp=ts_day2)
+    finally:
+        store.close()
+
+    db = tmp_path / "mi_band.db"
+    summary = summarize(db, hours=48, now=ts_day2 + 60, tz="Asia/Shanghai")
+    assert summary["tables"]["activity_history"]["daily"] == [
+        {"date": "2026-11-13", "minutes": 1, "steps": 120, "avg_heart_rate": 70.0},
+        {"date": "2026-11-14", "minutes": 1, "steps": 250, "avg_heart_rate": 80.0},
+    ]
+    report = format_report(summary)
+    assert "2026-11-13: 120 steps" in report
+    assert "2026-11-14: 250 steps" in report
+    assert report_main(["--db", str(db), "--band-tz", "Invalid/Zone"]) == 1

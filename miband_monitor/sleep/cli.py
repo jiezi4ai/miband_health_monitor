@@ -14,6 +14,8 @@ import sqlite3
 import sys
 from typing import Optional, Sequence
 
+from miband_monitor.history.protocol import resolve_band_tz
+
 from .detection import detect_sessions
 from .report import _format_report
 from .samples import local_date, load_samples
@@ -31,7 +33,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         metavar="YYYY-MM-DD",
         help="only report sessions that ended on this local date",
     )
+    parser.add_argument(
+        "--band-tz",
+        default=None,
+        metavar="TZ",
+        help=(
+            "band local timezone for formatting/grouping, e.g. Asia/Shanghai "
+            "or +08:00 (default: BAND_TZ env or host local timezone)"
+        ),
+    )
     args = parser.parse_args(argv)
+
+    try:
+        band_tz = resolve_band_tz(args.band_tz)
+    except ValueError as exc:
+        print(f"[-] {exc}", file=sys.stderr)
+        return 1
 
     try:
         samples = load_samples(args.db, include_scores=True)
@@ -44,7 +61,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         samples = [
             sample
             for session in sessions
-            if local_date(session[-1]["ts"]) == args.night
+            if local_date(session[-1]["ts"], tz=band_tz) == args.night
             for sample in session
         ]
         # Re-run detection on the filtered samples so the session list matches.
@@ -52,12 +69,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             print(f"no sleep session ending on {args.night}")
             return 1
 
-    result = analyze(samples)
+    result = analyze(samples, tz=band_tz)
     if args.json:
         payload = {key: value for key, value in result.items() if key != "_sessions"}
         print(json.dumps(payload, ensure_ascii=False, indent=2))
     else:
-        print(_format_report(result))
+        print(_format_report(result, tz=band_tz))
     return 0
 
 

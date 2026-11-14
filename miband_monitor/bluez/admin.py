@@ -102,5 +102,5 @@ async def disconnect_device(address: str, timeout: float = DBUS_TIMEOUT) -> bool
         finally:
             bus.disconnect()
     except Exception as exc:
-        logger.debug("Failed to disconnect BlueZ device: %s", exc)
+        logger.debug("Failed to disconnect BlueZ device: %s: %s", type(exc).__name__, exc)
         return False
