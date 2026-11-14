@@ -50,12 +50,12 @@ DEFAULT_LOG_LEVEL = "INFO"
 # BLE connection budgets (seconds)
 # ---------------------------------------------------------------------------
 #: Time spent waiting for one advertising packet from the band. A Mi Band 6
-#: without a phone link emits one isolated pulse every 40-60 s, so short windows
+#: without a phone link emits one isolated pulse every 40-78 s, so short windows
 #: cannot work.
-DEFAULT_SCAN_TIMEOUT = 90.0
+DEFAULT_SCAN_TIMEOUT = 120.0
 #: Budget for one full BLE link attempt; raised to at least one advertising
 #: period by the BlueZ link helper.
-DEFAULT_CONNECT_TIMEOUT = 75.0
+DEFAULT_CONNECT_TIMEOUT = 120.0
 #: Shorter budget for the bonded-device fast path before a scan fallback.
 DEFAULT_DIRECT_CONNECT_TIMEOUT = 10.0
 #: Chunked ECDH handshake deadline (seconds).

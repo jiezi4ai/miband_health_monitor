@@ -194,14 +194,14 @@ class LinkMixin:
             remaining = deadline - time.monotonic()
             # Do NOT call _ensure_bluez_ready here after a scan: extra D-Bus
             # roundtrips burn the band's ~10 ms post-pulse connect window.
-            # Direct Connect must exceed one kernel LE_CONN_TIMEOUT (40 s) so we
-            # never abort an in-flight LE Create Connection prematurely (which
-            # can wedge adapters like BARROT), while still leaving budget for a
-            # full scan + BAND_PULSE_PERIOD standby if the band needs discovery.
+            # Direct Connect runs exactly one full kernel LE_CONN_TIMEOUT (40 s)
+            # cycle without starting a second attempt that would be cut short mid-
+            # flight (cancelling an active LE Create Connection wedges adapters
+            # like BARROT), leaving the rest of the budget for pulse scanning.
             if phase == "direct":
                 if remaining < 3.0:
                     break
-                direct_cap = max(bluez.LE_CONN_TIMEOUT + 5.0, budget * 0.55)
+                direct_cap = bluez.LE_CONN_TIMEOUT + 2.0
                 slice_timeout = min(remaining, direct_cap)
             else:
                 slice_timeout = max(remaining, bluez.BAND_PULSE_PERIOD)

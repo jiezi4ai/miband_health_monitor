@@ -161,9 +161,9 @@ async def _check_bluez(report: _Report, device_id: str) -> None:
     report.add(
         INFO,
         "band advertising",
-        "a Mi Band 6 without a phone link emits ONE pulse every 40-60 s and none "
+        "a Mi Band 6 without a phone link emits ONE pulse every 40-78 s and none "
         "while its screen is off; sliding the screen does not make it advertise",
-        hint="use --scan-timeout 120 (default 90); one pulse period is 40-60 s",
+        hint="default --scan-timeout / --connect-timeout is 120 s (observed pulses up to ~78 s)",
     )
 
     usb_power = inspect_usb_autosuspend(adapter["name"])

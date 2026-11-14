@@ -24,6 +24,7 @@ from .constants import (
     BLUEZ_SERVICE,
     DBUS_TIMEOUT,
     DEVICE_IFACE,
+    LE_CONN_TIMEOUT,
     OBJECT_MANAGER_IFACE,
     OBJECT_MANAGER_PATH,
     SERVICE_RESOLVE_GRACE,
@@ -84,6 +85,9 @@ async def wait_for_bluez_link(
     drop_durations: list[float] = []
     connected_since: Optional[float] = None
     grace_applied = False
+    pending_started_at: Optional[float] = None
+    pending_grace_applied = False
+    no_rearm = False
     errors: list[str] = []
     bus = None
     last_path: Optional[str] = None
@@ -107,6 +111,7 @@ async def wait_for_bluez_link(
             # controller enters initiating state immediately after scan hit.
             last_path = device_path
             attempts += 1
+            pending_started_at = loop.time()
             pending = asyncio.ensure_future(
                 bus.call(
                     Message(
@@ -173,6 +178,24 @@ async def wait_for_bluez_link(
                         address,
                         SERVICE_RESOLVE_GRACE,
                     )
+                elif (
+                    not info["connected"]
+                    and pending is not None
+                    and not pending.done()
+                    and not pending_grace_applied
+                    and float(timeout) >= LE_CONN_TIMEOUT
+                    and pending_started_at is not None
+                ):
+                    pending_grace_applied = True
+                    no_rearm = True
+                    in_flight_left = max(1.0, (pending_started_at + LE_CONN_TIMEOUT + 2.0) - loop.time())
+                    deadline = loop.time() + min(LE_CONN_TIMEOUT + 2.0, in_flight_left)
+                    logger.info(
+                        "BlueZ Device1.Connect for %s still in flight at deadline; "
+                        "waiting up to %.0fs for kernel LE Create Connection to settle.",
+                        address,
+                        deadline - loop.time(),
+                    )
                 else:
                     return _finish(
                         "services-timeout" if info["connected"] else "connect-timeout",
@@ -187,11 +210,13 @@ async def wait_for_bluez_link(
 
             delay = poll_interval
             if pending is None or pending.done():
+                text = ""
                 if pending is not None:
                     exc = None
                     if not pending.cancelled():
                         exc = pending.exception()
                     pending = None
+                    pending_started_at = None
                     if exc is not None:
                         text = f"{type(exc).__name__}: {exc}"
                         errors.append(text)
@@ -211,9 +236,21 @@ async def wait_for_bluez_link(
                             delay = min(4.0, 1.0 * (2 ** min(consecutive_errors - 1, 2)))
                     else:
                         consecutive_errors = 0
-                if info.get("path") and loop.time() < deadline:
+                remaining_budget = deadline - loop.time()
+                if no_rearm or (
+                    "abort-by-local" in text and remaining_budget < LE_CONN_TIMEOUT + 1.0
+                ):
+                    logger.debug(
+                        "Skipping another Device1.Connect for %s (%.1fs left, < %.0fs LE_CONN_TIMEOUT).",
+                        address,
+                        max(0.0, remaining_budget),
+                        LE_CONN_TIMEOUT,
+                    )
+                    return _finish("connect-timeout", info)
+                if info.get("path") and remaining_budget > 0:
                     last_path = info["path"]
                     attempts += 1
+                    pending_started_at = loop.time()
                     message = Message(
                         destination=BLUEZ_SERVICE,
                         path=info["path"],

@@ -57,22 +57,16 @@ def compute_scan_budget(
     return max(remaining, min(float(scan_timeout), float(band_pulse_period)))
 
 
-async def clear_stale_bond_and_start_agent(client_owner: Any) -> bool:
-    """Clear a bonded BlueZ object via Adapter1.RemoveDevice and arm Agent1."""
-    if getattr(client_owner, "_stale_bond_reset_attempted", False):
-        return False
-    if await bluez.paired_device(client_owner.device_id) is None:
-        return False
+async def _reset_bluez_device_and_start_agent(
+    client_owner: Any,
+    *,
+    reason_log: str,
+) -> bool:
+    """Remove cached BlueZ device state and start the pairing agent."""
     client_owner._stale_bond_reset_attempted = True
-    logger.warning(
-        "Detected %d consecutive unresolved BlueZ drops on bonded device %s "
-        "(likely stale LTK); clearing cached BlueZ bond and enabling pairing "
-        "agent for clean re-pair.",
-        client_owner._unresolved_drops,
-        client_owner.device_id,
-    )
+    logger.warning(reason_log, client_owner.device_id)
     if not await bluez.remove_device(client_owner.device_id):
-        logger.warning("Could not remove stale BlueZ bond for %s.", client_owner.device_id)
+        logger.warning("Could not remove stale BlueZ state for %s.", client_owner.device_id)
         return False
     client_owner._trusted_paths.clear()
     client_owner._reused_bluez_link = False
@@ -82,8 +76,24 @@ async def clear_stale_bond_and_start_agent(client_owner: Any) -> bool:
         if await agent.start():
             client_owner._pairing_agent = agent
         else:
-            logger.debug("BlueZ pairing agent failed to start during stale-bond recovery.")
+            logger.debug("BlueZ pairing agent failed to start during recovery.")
     return True
+
+
+async def clear_stale_bond_and_start_agent(client_owner: Any) -> bool:
+    """Clear a bonded BlueZ object via Adapter1.RemoveDevice and arm Agent1."""
+    if getattr(client_owner, "_stale_bond_reset_attempted", False):
+        return False
+    if await bluez.paired_device(client_owner.device_id) is None:
+        return False
+    return await _reset_bluez_device_and_start_agent(
+        client_owner,
+        reason_log=(
+            f"Detected {client_owner._unresolved_drops} consecutive unresolved "
+            "BlueZ drops on bonded device %s (likely stale LTK); clearing cached "
+            "BlueZ bond and enabling pairing agent for clean re-pair."
+        ),
+    )
 
 
 async def handle_bluez_standby_failure(
@@ -110,7 +120,22 @@ async def handle_bluez_standby_failure(
             )
 
     recovered = False
-    if should_attempt_stale_bond_recovery(
+    info = outcome.get("info") or {}
+    if (
+        outcome.get("reason") == "services-timeout"
+        and not getattr(client_owner, "_stale_bond_reset_attempted", False)
+        and info.get("path")
+        and not info.get("paired")
+        and not info.get("bonded")
+    ):
+        recovered = await _reset_bluez_device_and_start_agent(
+            client_owner,
+            reason_log=(
+                "GATT service resolution timed out on half-paired BlueZ device %s; "
+                "clearing incomplete cache and enabling pairing agent before retry."
+            ),
+        )
+    elif should_attempt_stale_bond_recovery(
         total_unresolved_drops=client_owner._unresolved_drops,
         had_prior_unresolved_drop=prior_drops >= 1,
         outcome_ready=False,

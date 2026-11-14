@@ -58,12 +58,12 @@ CONNECT_SLICE_TIMEOUT = 25.0
 BLUEZ_TEMP_OBJECT_TIMEOUT = 30.0
 
 #: A Mi Band 6 that lost its phone link emits ONE isolated advertising pulse
-#: every 40-60 s and stops advertising entirely while its screen is off;
-#: lighting or sliding the screen does not change that (measured 2026-11-12,
-#: see docs/validation/linux-ble-connect-findings.md).  A link attempt therefore has to
-#: stay armed for longer than one full pulse period, otherwise the "detect
-#: pulse -> connect for 15 s -> re-scan" pattern misses every other pulse.
-BAND_PULSE_PERIOD = 70.0
+#: every 40-78 s and stops advertising entirely while its screen is off;
+#: lighting or sliding the screen does not change that (measured 2026-11-12/14,
+#: see docs/validation/linux-ble-connect-findings.md).  A link attempt therefore
+#: has to stay armed across a full pulse interval plus GATT resolution,
+#: otherwise the "detect pulse -> connect -> re-scan" pattern misses pulses.
+BAND_PULSE_PERIOD = 90.0
 
 #: Time BlueZ needs after ServicesResolved to settle the SMP new_auth() round
 #: and the built-in profile probes.  A GATT write issued inside that window

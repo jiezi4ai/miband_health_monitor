@@ -57,13 +57,16 @@ class AuthConnectMixin:
         self._disconnected.clear()
         self._prv_key, self._pub_key = generate_ecdh_keys()
 
+        direct_device = await self._direct_connect_target()
+        agent_pref = env_str(ENV_BLUEZ_AGENT, "").strip().lower()
+        agent_enabled = agent_pref in ("1", "true", "yes", "on") or (
+            agent_pref not in ("0", "false", "no", "off")
+            and (direct_device is None or getattr(self, "_auto_enable_pairing_agent", False))
+        )
         if (
             bluez.is_bluez_platform()
             and self._client_factory is self._bleak_client_class
-            and (
-                env_str(ENV_BLUEZ_AGENT, "").lower() in ("1", "true", "yes")
-                or getattr(self, "_auto_enable_pairing_agent", False)
-            )
+            and agent_enabled
         ):
             if self._pairing_agent is None:
                 agent = bluez.BlueZPairingAgent(self.device_id)
@@ -72,7 +75,6 @@ class AuthConnectMixin:
                 else:
                     logger.debug("BlueZ pairing agent failed to start; continuing without it.")
 
-        direct_device = await self._direct_connect_target()
         await self._open_client(direct_device, scan_timeout, connect_timeout)
         try:
             await self._prepare_and_authenticate(auth_timeout)
