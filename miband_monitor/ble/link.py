@@ -192,7 +192,8 @@ class LinkMixin:
                 scan_deadline = time.monotonic() + scan_budget
                 device = await self._discover_device(scan_timeout, deadline=scan_deadline)
             remaining = deadline - time.monotonic()
-            await self._ensure_bluez_ready(device)
+            # Do NOT call _ensure_bluez_ready here after a scan: extra D-Bus
+            # roundtrips burn the band's ~10 ms post-pulse connect window.
             # Direct Connect must exceed one kernel LE_CONN_TIMEOUT (40 s) so we
             # never abort an in-flight LE Create Connection prematurely (which
             # can wedge adapters like BARROT), while still leaving budget for a
@@ -233,10 +234,14 @@ class LinkMixin:
                     direct_device = None
                     device = None
                     post_reset_scan = True
+                    await self._ensure_bluez_ready(None)
+                elif device is not None:
+                    await self._ensure_bluez_ready(device)
                 continue
             self._unresolved_drops = 0
             info = outcome["info"] or {}
             ble_device = bluez.make_ble_device(info) or device
+            await self._ensure_bluez_ready(ble_device)
             slice_budget = max(8.0, min(deadline - time.monotonic(), bluez.CONNECT_SLICE_TIMEOUT))
             client = self._new_client(ble_device, slice_budget)
             self.client = client

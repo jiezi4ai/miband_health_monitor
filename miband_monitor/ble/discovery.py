@@ -151,8 +151,10 @@ class DiscoveryMixin:
                     self._trusted_paths.add(dev_path)
         if self._pairing_agent is not None:
             self._pairing_agent.target_address = bluez.normalize_address(target_mac)
-            with contextlib.suppress(Exception):
-                await self._pairing_agent.ensure_ready_for_device(target_mac)
+            if dev_path not in self._trusted_paths or not getattr(self, "_pairable_armed", False):
+                with contextlib.suppress(Exception):
+                    await self._pairing_agent.ensure_ready_for_device(target_mac)
+                    self._pairable_armed = True
 
     async def _discover_device(self, scan_timeout: float, deadline: Optional[float] = None):
         """Run a BLE scan until the first matching advertisement arrives."""
@@ -218,8 +220,6 @@ class DiscoveryMixin:
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
             await scanner.stop()
-        if found_device is not None:
-            await self._ensure_bluez_ready(found_device)
         return found_device
 
     async def _scan_heartbeat(self, stop_event: asyncio.Event, stats: dict) -> None:

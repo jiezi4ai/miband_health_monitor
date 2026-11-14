@@ -138,10 +138,16 @@ def format_usb_autosuspend_hint(usb_power: dict) -> str:
     vid = usb_power.get("vendor_id")
     pid = usb_power.get("product_id")
     if vid and pid:
+        # Match add|change|bind and btusb interface bind because btusb probe
+        # re-enables autosuspend after usbreset and udevadm trigger uses change.
         hint += (
-            f" | udev rule: ACTION==\"add\", SUBSYSTEM==\"usb\", "
+            f" | udev rules: "
+            f"ACTION==\"add|change|bind\", SUBSYSTEM==\"usb\", "
             f"ATTR{{idVendor}}==\"{vid}\", ATTR{{idProduct}}==\"{pid}\", "
-            f"TEST==\"power/control\", ATTR{{power/control}}=\"on\""
+            f"TEST==\"power/control\", ATTR{{power/control}}=\"on\"; "
+            f"ACTION==\"add|change|bind\", SUBSYSTEM==\"usb\", DRIVER==\"btusb\", "
+            f"ATTRS{{idVendor}}==\"{vid}\", ATTRS{{idProduct}}==\"{pid}\", "
+            f"TEST==\"../power/control\", ATTR{{../power/control}}=\"on\""
         )
     return hint
 

@@ -56,7 +56,10 @@ def test_usb_autosuspend_preflight_logs_udev_hint_only_when_risky(
 
     hint = format_usb_autosuspend_hint(info)
     assert "echo on | sudo tee" in hint
+    assert 'ACTION=="add|change|bind"' in hint
     assert 'ATTR{idVendor}=="33fa", ATTR{idProduct}=="0012"' in hint
+    assert 'DRIVER=="btusb"' in hint
+    assert 'ATTR{../power/control}="on"' in hint
 
     test_logger = logging.getLogger("test.preflight")
     caplog.set_level(logging.WARNING, logger="test.preflight")

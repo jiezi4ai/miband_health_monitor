@@ -224,3 +224,36 @@ async def test_stale_bond_streak_recovers_when_next_attempt_direct_times_out(
     assert removed == [MAC]
     assert agent_started == [True]
     assert call_n[0] == 2
+
+
+async def test_open_bluez_link_defers_ready_check_until_after_wait_for_link(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = [1000.0]
+    events: list[object] = []
+
+    async def fake_wait(_addr: str, *, timeout: float, **_kw):
+        events.append("wait_for_bluez_link")
+        return {
+            "ready": True,
+            "reason": "resolved",
+            "attempts": 1,
+            "dropped_unresolved": 0,
+            "info": {"ble": FakeDevice(MAC)},
+        }
+
+    _patch_stale_bond_env(monkeypatch, now=now, wait_fn=fake_wait)
+    client = _make_stub_client()
+
+    async def track_discover(*_a, **_kw):
+        events.append("discover")
+        return FakeDevice(MAC)
+
+    async def track_ready(device=None) -> None:
+        events.append(("ready", getattr(device, "address", None)))
+
+    client._discover_device = track_discover  # type: ignore[method-assign]
+    client._ensure_bluez_ready = track_ready  # type: ignore[method-assign]
+
+    await client._open_bluez_link(None, scan_timeout=75.0, connect_timeout=75.0)
+    assert events == [("ready", None), "discover", "wait_for_bluez_link", ("ready", MAC)]
