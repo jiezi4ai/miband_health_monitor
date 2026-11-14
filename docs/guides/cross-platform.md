@@ -66,37 +66,55 @@ python3 -m venv .venv
 .venv/bin/python miband_client.py --demo 2 --imu --output data/demo --export-csv
 ```
 
-### 2.3 真机（**trust 即可，pair 可选**）
+### 2.3 真机（区分“首次无缓存配对”与“已有缓存日常使用”）
 
-Linux/BlueZ 与 Windows 不同：系统不会在连接时自动完成配对。**未配对/未信任时，
-手环只给约 9–9.8 秒的 GATT 枚举窗口**（首次连接需要逐个读取 ~150 个句柄），
-一旦当时处于休眠连接间隔就会被踢断，日志表现为
-`failed to discover services, device disconnected` 或
+Linux/BlueZ 与 Windows 不同：系统不会在无 agent 时自动完成 SMP 配对；且**首次连接尚无 GATT 缓存时，
+手环只给约 9–9.8 秒的未认证枚举窗口**（需逐个读取 ~150 个句柄），若当时手环处于休眠连接间隔会被踢断，
+日志表现为 `failed to discover services, device disconnected` 或
 `UnknownObject: Method "WriteValue" ... doesn't exist`。
 
+#### 场景 A：首次配对 / 主机无 BlueZ 设备缓存
+
+当你刚在 `--doctor` 看到 `device not known to BlueZ yet`（新主机，或刚执行过 `bluetoothctl remove` 清空缓存）时：
+
 ```bash
-# 0) 自检，确认适配器 powered、设备 trusted/connected
+# 0) 自检：确认适配器 powered=yes 且手机蓝牙已关闭
 .venv/bin/python miband_client.py --doctor
 
-# 1) 让适配器可配对（仅当你打算做一次真正的 Bond；日常连接不需要）
-bluetoothctl pairable on
+# 1) 填好配置（至少 DEVICE_ID 与 AUTH_KEY）
+cp .env.example .env
 
-# 2) 找到手环并信任（trust 才是关键：它让 BlueZ 保留设备对象、缓存 GATT 表
-#    并开启内核自动回连）
-bluetoothctl scan on            # 手环无手机链路时每 40-60 秒才发一个脉冲，耐心等
-bluetoothctl trust AA:BB:CC:DD:EE:FF
-bluetoothctl scan off
-
-# 3)（可选）做一次 Bond；仍绑定手机的手环常返回 AuthenticationCanceled
-bluetoothctl pair  AA:BB:CC:DD:EE:FF
-#    或让客户端内置 agent 代劳：
-MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 15
-
-# 4) 填配置并运行
-cp .env.example .env            # 填 DEVICE_ID（MAC）与 AUTH_KEY
-.venv/bin/python scan_ble.py    # 可选：确认广播、核对 MAC
-.venv/bin/python miband_client.py 60 --log-level DEBUG
+# 2) 推荐方式：开启进程内配对 agent，直接走首次扫描 + 自动信任 + SMP 配对
+#    （保持手环在 1 米内并尽量亮屏/佩戴，便于 ~9s 看门狗内完成首次 GATT 枚举）
+MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 60 --log-level INFO
 ```
+
+**首次无缓存配对机制与注意事项：**
+- **无需手敲 `bluetoothctl pair`**：带 `MIBAND_BLUEZ_AGENT=1` 运行时，客户端会在扫描捕获 40–60s 脉冲后、发起 `Device1.Connect` 之前自动设置适配器 `Pairable=on` 与设备 `Trusted=True`，并用内置 `NoInputNoOutput` agent 放行目标手环的 SMP 请求；若刚好卡在超时边缘连上，还会触发 10 秒 `SERVICE_RESOLVE_GRACE` 宽限确保首次枚举完成。
+- **不建议直接手工提前 `pair`**：若手机端仍未断开或持有互斥绑定，手工 `bluetoothctl pair` 容易直接被手环拒绝（`AuthenticationCanceled`）。
+- **必须保留的 `.env` 凭证**：删除主机 BlueZ 缓存不影响 `.env`；但如果你还对手环做了**恢复出厂设置或 Zepp Life 解绑重绑**，手环内置 `AUTH_KEY` 会更新，必须重新提取并更新 `.env` 才能通过应用层 ECDH 认证。
+- **公共广播前提**：手环重启后可能丢失易失“公共广播”状态；若 120s 仍扫不到脉冲，先用手机 Zepp Life 连一次手环再关掉手机蓝牙。
+
+#### 场景 B：已有设备缓存 / 正常日常复连（勿盲目删配对）
+
+当你用 `--doctor` 看到设备已处于 `paired=yes trusted=yes`（首次配对完成后就会持久写入 BlueZ）：
+
+```bash
+# 日常直接运行即可，不要再加 MIBAND_BLUEZ_AGENT=1，也不要每次先 bluetoothctl remove
+.venv/bin/python miband_client.py 60
+```
+
+**有缓存情况下的重要原则：**
+1. **切勿每次连接前都清空 BlueZ 缓存**：每次 `remove` 都会销毁 GATT 服务表缓存与 `direct connect` 免扫描快路径，重新暴露在 ~9s 未认证看门狗下；若手机端未彻底断连还会增加 `AuthenticationCanceled` 概率。
+2. **手机 Zepp Life 正常同步不会破坏现有配对**：实测证明手机端完成同步并关闭蓝牙后，Linux 侧已有 `Paired / Bonded / Trusted` 密钥依然完好，直接默认命令即可 1 次直连成功（`0 WARNING / 0 ERROR`）。
+3. **何时才需要清缓存重配（与自动自愈）**：仅当手环换绑其他主控导致 BlueZ 持有的 `LTK` 陈旧失效（典型症状为建链后约 5 秒且 `ServicesResolved=False` 掉线）时才需要重配。客户端在连续命中 2 次未解析断链且确认设备为 `Paired=yes` 时会自动调用 `remove_device()` 清缓存并拉起 agent 自愈；如需手动恢复，可执行：
+   ```bash
+   bluetoothctl remove AA:BB:CC:DD:EE:FF
+   MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 60
+   ```
+4. **若上次强杀留下 `Connected=yes` 残留**：客户端会自动清理幽灵连接（`Connected=True, ServicesResolved=False`）；若复用半温连接（`Connected=True, ServicesResolved=True`）时握手失败，也会主动 `disconnect_device()` 回退到干净初态重连。
+
+（如需手工执行传统只 trust 不 pair 的旧步骤，可执行 `bluetoothctl scan on` 捕捉脉冲后 `bluetoothctl trust AA:BB:CC:DD:EE:FF`。）
 
 关于广播频率（**已实测，与旧文档相反**）：手机蓝牙关闭后，小米手环 6
 **每 40–60 秒才发出 1 个孤立的可连接广播脉冲，屏幕熄灭时完全不发**；
@@ -104,14 +122,15 @@ cp .env.example .env            # 填 DEVICE_ID（MAC）与 AUTH_KEY
 因此 Linux 路径改为：扫到第一个脉冲后**把一个 `Device1.Connect` 一直挂着**
 （最长 70 秒，覆盖整个脉冲周期），而不是"连 15 秒失败就回去重扫"。
 
-trust 之后：
+`trust` / 首次配对持久化之后：
 
 - BlueZ 会保留设备对象与 GATT 缓存；后续连接不再需要重新枚举 150 个句柄，
   内核还能在手环出现时自动回连（实测 2026-11-12：连续 6 次自动回连，间隔约 61 秒）；
 - 连接不再依赖"恰好扫到广播期间按下回车"——待命中的 `Connect` 会等到脉冲；
 - ATT MTU 会显式协商（此前恒为 23 字节）。
 
-详细证据与时间线见 [Linux 连接排查纪实](../validation/linux-ble-connect-findings.md)。
+详细证据与实测报告见 [Linux 连接排查纪实](../validation/linux-ble-connect-findings.md) 与
+[Linux BLE 受控复测与陈旧 LTK 报告](../validation/linux-ble-test-report.md)。
 
 ### 2.4 常见问题
 
@@ -134,7 +153,10 @@ trust 之后：
 |---|---|
 | 直连优先 | 已真正绑定（bonded）设备从 BlueZ 对象树直接连接；`Connected+ServicesResolved` 的连接直接复用；不再信任"有 RSSI 就算新鲜"的缓存对象 |
 | 待命建链 | 扫到脉冲后由一个长驻 `Device1.Connect` 覆盖整个 70 秒广播周期，内核 40 秒 abort 后约 150 ms 自动重挂；**全程不发 `Disconnect`**（取消挂起连接会让部分适配器扫描假死） |
-| 内置配对 Agent | `MIBAND_BLUEZ_AGENT=1` 时在系统 D-Bus 注册 `org.bluez.Agent1`（`NoInputNoOutput`），自动放行目标手环 SMP 请求 |
+| 内置配对 Agent | `MIBAND_BLUEZ_AGENT=1` 时在系统 D-Bus 注册 `org.bluez.Agent1`（`NoInputNoOutput`），自动放行目标手环 SMP 请求；首次无缓存配对建议开启，已有健康配对后无需开启 |
+| 服务解析宽限 | 若在 70 s 待命预算截止前恰好物理建链（`Connected=True`），`wait_for_bluez_link()` 额外授予 10 s `SERVICE_RESOLVE_GRACE` 避免打断首次 GATT 枚举 |
+| 残留连接自愈 | 发现 `Connected=True, ServicesResolved=False` 幽灵残留时先清再连；复用已连接对象却建链/认证失败时主动 `disconnect_device()` 回退干净状态 |
+| 陈旧 LTK 自愈 | 若已配对设备连续命中 `dropped_unresolved >= 2`（约 5 s 加密超时掉线），自动 `remove_device()` 并临时拉起配对 agent 重建干净绑定（每次运行至多一次） |
 | 扫描参数 | `DuplicateData=False`（BT 5/6 上 `True` 会让 BlueZ 每 ~5 秒重启扩展扫描）；`MIBAND_BLUEZ_DUPLICATE_DATA=1` 可恢复 |
 | SMP 结算等待 | `ServicesResolved` 后等 1.5 秒再发第一条 GATT 写，避免堵在 BlueZ 的 `new_auth` + HID/device-info 探测后面 |
 | Fast Retry | 遇 `le-connection-abort-by-local`、`InProgress`、`failed to discover services` 原地重试，不再嵌套重扫 |

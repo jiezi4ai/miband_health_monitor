@@ -36,6 +36,9 @@
 | **Pre-check** | 手机 Zepp Life 刚刚完成一次正常同步后关蓝牙 | 仅 `bluetoothctl info` 观测，**不动手环与缓存** | 状态核验 | **状态完好** | `Paired=yes, Bonded=yes, Trusted=yes, Connected=no` |
 | **Test 0** | 紧接 Pre-check（`Connected=no`） | **不清缓存、不开 `MIBAND_BLUEZ_AGENT`** | 20 s 冒烟 | **成功**（`EXIT_CODE=0`） | 1 次 `direct connect`（18 s）直连，**0 WARNING / 0 ERROR** |
 | **Test B** | 紧接 Test 0（`Connected=no`） | **不清缓存、不开 `MIBAND_BLUEZ_AGENT`** | 60 s + `--imu` 压力测试 | **成功**（`EXIT_CODE=0`） | 1 次 `direct connect`（13.5 s）直连，4 次 `[0x16]` 保活，IMU 达 `Seq 91`，**0 WARNING / 0 ERROR** |
+| **Post-reboot** | 系统重启后（`Paired/Bonded/Trusted=yes, Connected=no`） | **不清缓存、不开 `MIBAND_BLUEZ_AGENT`** | `--imu --sync-history 1 --band-tz Asia/Shanghai --export-csv` 60 s | **成功**（`EXIT_CODE=0`） | 1 次 `direct connect`（30.9 s）直连，1440 条历史 + 44 HR + 1548 IMU 零掉线，**0 WARNING / 0 ERROR** |
+| **Fresh Pair 1** | 先 `remove_device()` 彻底清零 BlueZ 对象（`not known to BlueZ yet`） | 模拟新机首次：`MIBAND_BLUEZ_AGENT=1` | `--imu --sync-history 1 --band-tz Asia/Shanghai --export-csv` 60 s | **成功**（`EXIT_CODE=0`） | 10.7 s 扫到脉冲，触发 `SERVICE_RESOLVE_GRACE` 10 s 宽限并 +1.8 s 解析成功，agent 自动授权 SMP，1440 条历史 + 45 HR + 1548 IMU，**0 WARNING / 0 ERROR** |
+| **Fresh Pair 2** | 紧接 Fresh Pair 1（新配对已固化） | **不再开 `MIBAND_BLUEZ_AGENT`** | 默认 20 s 复连验证 | **成功**（`EXIT_CODE=0`） | `--doctor` 显示 `paired=yes trusted=yes`，默认命令 1 次建链直通（15 HR + 1 steps），**0 WARNING / 0 ERROR** |
 
 ---
 

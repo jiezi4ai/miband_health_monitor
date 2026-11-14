@@ -21,7 +21,7 @@ Linux 下 BlueZ 与 WinRT/CoreBluetooth 有三处关键差异，本模块把差�
 | `platform.py` | `is_bluez_platform`、地址规范化 / MAC 判定 |
 | `dbus.py` | `_managed_objects` 与 D-Bus 基础调用 |
 | `devices.py` | `list_known_devices`、`find_device`、`make_ble_device`、`connected_device`、`paired_device`、`active_cached_device` |
-| `admin.py` | `set_adapter_pairable`、`set_device_trusted`、`disconnect_device` |
+| `admin.py` | `set_adapter_pairable`、`set_device_trusted`、`disconnect_device`、`remove_device` |
 | `link.py` | `link_standby_budget`、`wait_for_bluez_link`（待命 Connect 循环） |
 | `pairing.py` | `BlueZPairingAgent`（`NoInputNoOutput` 进程内 agent） |
 | `mtu.py` | `try_acquire_mtu` |
@@ -35,7 +35,7 @@ Linux 下 BlueZ 与 WinRT/CoreBluetooth 有三处关键差异，本模块把差�
 `find_device(address)`、`list_adapters()`、`make_ble_device(info)`、
 `connected_device(address)`、`paired_device(address)`、`active_cached_device(...)`、
 `is_transient_connect_error()`、`is_in_progress_error()`、`scanner_kwargs()`、
-`set_adapter_pairable()`、`set_device_trusted()`、`disconnect_device()`、
+`set_adapter_pairable()`、`set_device_trusted()`、`disconnect_device()`、`remove_device()`、
 `wait_for_bluez_link()`、`BlueZPairingAgent`、`try_acquire_mtu(client)`、
 `describe_ble_error(exc)`。
 
@@ -78,7 +78,8 @@ ble.discovery
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
-| `failed to discover services, device disconnected`（约 9–10 s） | 未 trust，手环未认证连接看门狗到期（需枚举 ~150 个 GATT 句柄） | 自动重试；`bluetoothctl trust <MAC>` 后 BlueZ 缓存服务表 |
+| `failed to discover services, device disconnected`（约 9–10 s） | 未完成 GATT 缓存，手环未认证连接看门狗到期（需枚举 ~150 个句柄） | 自动重试；首次无缓存配对用 `MIBAND_BLUEZ_AGENT=1` 并尽量保持亮屏近距 |
+| `dropped-unresolved`（约 5 s 掉线、`ServicesResolved=False`） | BlueZ 保存了陈旧 `LTK` 导致空口 `LE Start Encryption` 超时（`0x08`） | `wait_for_bluez_link` 在 2 次掉线后提前结束，已配对设备自动触发 `remove_device()` + 配对 agent 自愈 |
 | `UnknownObject ... doesn't exist` | 未配对/已断链后 BlueZ 移除设备对象 | `describe_ble_error` 翻译为可操作提示；重连 |
 | `le-connection-abort-by-local` | 内核 40 s 发起周期未等到脉冲 | `wait_for_bluez_link` 约 150 ms 后原地重挂，**不主动 Disconnect** |
 | `-112 / host is down`、零广播 | BARROT `33fa:0012` 等适配器射频假死 | 只能 USB 复位：`usbreset` 或拔插 + `systemctl restart bluetooth`；D-Bus 电源循环无效 |
@@ -87,12 +88,13 @@ ble.discovery
 
 ## 测试
 
-- `tests/test_bluez_support.py`（重构后拆到 `tests/bluez/test_platform.py`、`test_devices.py`、
-  `test_link.py`、`test_pairing.py`、`test_errors.py`、`test_client_integration.py`、
-  `test_doctor.py`）：D-Bus 属性解析、地址/对象路径、待命预算、agent 生命周期、错误翻译、
-  与客户端集成的 monkeypatch 路径。
+- `tests/bluez/`（`test_platform.py`、`test_devices.py`、`test_link.py`、`test_pairing.py`、
+  `test_errors.py`、`test_client_integration.py`、`test_doctor.py`、`test_standby_backoff.py`、
+  `test_self_healing.py`）：D-Bus 属性解析、地址/对象路径、待命预算与宽限期、agent 生命周期、
+  残留连接与陈旧 LTK 自愈、错误翻译与客户端集成路径。
 - 真机证据：[validation/linux-validation.md](../validation/linux-validation.md)、
-  [validation/linux-ble-connect-findings.md](../validation/linux-ble-connect-findings.md)。
+  [validation/linux-ble-connect-findings.md](../validation/linux-ble-connect-findings.md)、
+  [validation/linux-ble-test-report.md](../validation/linux-ble-test-report.md)。
 
 ## 相关文档
 

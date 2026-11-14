@@ -39,7 +39,7 @@
 - 手环每 **40–60 秒**才发一个孤立可连接广播脉冲，熄屏时完全不发；
   **点亮/滑动屏幕不会让它广播更快**（2026-11-12 实测），只影响建链后的连接间隔，
   因此 `--scan-timeout 120`；
-- Linux 首次使用先 `bluetoothctl trust <MAC>`（见 [cross-platform.md](cross-platform.md)）；
+- Linux **首次无 BlueZ 缓存**建议使用 `MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 60` 自动完成信任与首次配对；**已有 `paired/trusted` 缓存**后直接运行默认命令即可免扫描直连（正常用手机同步后也无需清缓存，详见 [cross-platform.md](cross-platform.md)）；
 - 心率传感器在自动重连后会自动重新开启；
 - 启动日志前两行（`ECDH backend`、`Discovery target`）反馈问题时请一并附上。
 

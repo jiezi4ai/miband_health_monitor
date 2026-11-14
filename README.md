@@ -159,7 +159,8 @@ cp .env.example .env          # 填入 DEVICE_ID（MAC 或 macOS UUID）与 AUTH
 ```
 
 真机要点：**关闭手机蓝牙**；手环无手机链路时每 40–60 秒才发一个广播脉冲，
-`--scan-timeout` 建议 120；Linux 首次使用先 `bluetoothctl trust <MAC>`。
+`--scan-timeout` 建议 120；Linux 首次无缓存建议加 `MIBAND_BLUEZ_AGENT=1` 完成配对与 trust，
+已有缓存后直接运行即可免扫描直连（正常用手机同步后也无需清缓存）。
 详见 [docs/guides/cross-platform.md](docs/guides/cross-platform.md) 与
 [docs/guides/faq.md](docs/guides/faq.md)。
 
