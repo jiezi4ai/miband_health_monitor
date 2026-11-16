@@ -15,6 +15,7 @@ module docstring before running one.
 | probe_sleep_session.py | Probe the Huami SLEEP_SESSION (0x48) history type. |
 | probe_battery.py | Non-destructively probe whether the standard Bluetooth Battery Service (0x180F / 0x2A19) is available. |
 | calibrate_sleep.py | Compare candidate readings of the sleep bytes against Zepp Life numbers. |
+| reset_bt_adapter.py | Linux operator tool: auto-detect USB `<vid:pid>`, run `sudo usbreset` + `bluetooth` restart, and run `--doctor`. |
 | check_file_sizes.py | CI guard: first-party code/asset files must stay <= 300 lines. |
 | check_privacy.py | CI guard: no real MAC/auth key/home path in Git-tracked files. |
 | check_docs_links.py | CI guard: relative Markdown links resolve. |

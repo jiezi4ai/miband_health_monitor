@@ -15,6 +15,7 @@
 | probe_battery.py | 非破坏性探测标准蓝牙 Battery Service (0x180F / 0x2A19) 是否可用。 |
 | calibrate_sleep.py | 用 Zepp Life 的数字对照睡眠字节的候选读法。 |
 | remediate.py | 独立运行脚本化连接排障与一键修复 Playbook（与 `gui.py` / `--gui` 共享后端）。 |
+| reset_bt_adapter.py | Linux 人工恢复工具：自动读取 USB `<vid:pid>`，执行 `sudo usbreset` + 重启 `bluetooth` 并运行 `--doctor`。 |
 | check_file_sizes.py | CI 守门：第一方代码/资源文件必须 ≤ 300 行。 |
 | check_privacy.py | CI 守门：Git 跟踪文件中不得出现真实 MAC、auth key 或家目录路径。 |
 | check_docs_links.py | CI 守门：相对 Markdown 链接必须可以解析。 |

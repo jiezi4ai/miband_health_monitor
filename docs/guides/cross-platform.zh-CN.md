@@ -138,6 +138,8 @@ MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 60 --log-level INFO
 
 > **排查首选（Linux 突然连不上/扫不到时第一步执行）**：
 > ```bash
+> .venv/bin/python tools/reset_bt_adapter.py   # 自动识别 USB vid:pid -> 确认后 usbreset + restart bluetooth -> --doctor
+> # 或手动执行：
 > sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth   # 若非 33fa:0012 请先用 lsusb 查 vid:pid
 > .venv/bin/python miband_client.py --doctor
 > ```

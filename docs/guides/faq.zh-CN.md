@@ -9,10 +9,12 @@
 > **Linux 连不上时的首选排障步骤（推荐第一步）**：
 > 若确认手机蓝牙已关但 Linux 仍反复连不上（尤其是日志出现 `other BLE=0` 或 `-112` 时），优先执行硬件 USB 级复位并重启蓝牙栈，再用 `--doctor` 核验就绪状态：
 > ```bash
+> .venv/bin/python tools/reset_bt_adapter.py
+> # 或手动执行（非 BARROT 33fa:0012 先用 lsusb 查看 <vid:pid>）：
 > sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth
 > .venv/bin/python miband_client.py --doctor
 > ```
-> （若适配器不是 BARROT `33fa:0012`，先用 `lsusb` 查看实际 `<vid:pid>` 替换）。
+> （`tools/reset_bt_adapter.py` 会自动从 `/sys/class/bluetooth/hci0` 探测 `<vid:pid>`，确认后提权复位并自动运行 `--doctor`；支持 `--dry-run` 预览与 `-y` 跳过确认。）
 > **原理与优势**：该组合直接从 USB 总线冷复位芯片射频/扫描状态机（普通 `bluetoothctl power off/on` 无法清零硬件状态机），同时让 `bluetoothd` 重新绑定新 `hci0` 与 D-Bus 会话，且**完整保留磁盘上已有的 `Paired / Trusted` 配对缓存与 GATT 表**；随后 `--doctor` 可一键确认控制器 `powered=yes`、配对完好且无残留 `connected=yes`。（注意会短暂断开本机其他蓝牙外设。）
 
 | 现象 | 原因/处理 |

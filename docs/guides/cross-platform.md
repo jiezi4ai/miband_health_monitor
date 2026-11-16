@@ -138,6 +138,8 @@ For detailed evidence and measurement reports, see [Linux connection troubleshoo
 
 > **Preferred first troubleshooting step (first action when Linux suddenly stops connecting)**:
 > ```bash
+> .venv/bin/python tools/reset_bt_adapter.py   # auto-detects USB vid:pid -> confirms -> usbreset + restart bluetooth -> --doctor
+> # Or run manually:
 > sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth   # check lsusb for vid:pid if not 33fa:0012
 > .venv/bin/python miband_client.py --doctor
 > ```
