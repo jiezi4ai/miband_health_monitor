@@ -89,12 +89,16 @@ In response to the two types of abnormal precursor states exposed by Tests 1–4
 
 ## 5. Future FAQ and Systematic Debug Approach
 
-### 5.1 "State Baseline Check" Before Every Investigation (takes 10 seconds)
+### 5.1 "Preferred Reset & State Baseline Check" Before Every Investigation
 
-Before suspecting the code or the Bluetooth stack, run the following three commands to establish a factual baseline:
+When connections suddenly stall, scan heartbeats report `other BLE=0`, or retries keep failing, **make hardware USB reset + `bluetoothd` restart + `--doctor` your first troubleshooting step** (it cold-resets stalled adapter firmware while preserving your cached pairing keys and GATT table, making it safer and more effective than `power off/on` or deleting the bond):
 
 ```bash
-# 1. Confirm phone Bluetooth is off / Zepp Life is not holding the link in the background, and run the environment self-check
+# 0. Preferred quick reset & check (briefly disconnects other Bluetooth peripherals; use lsusb if not 33fa:0012)
+sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth
+.venv/bin/python miband_client.py --doctor
+
+# 1. Read-only baseline check: confirm phone Bluetooth is off / Zepp Life is not holding the link
 python3 miband_client.py --doctor
 
 # 2. View the four BlueZ object states (focus on Paired / Bonded / Trusted / Connected)

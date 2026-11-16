@@ -136,6 +136,16 @@ For detailed evidence and measurement reports, see [Linux connection troubleshoo
 
 ### 2.4 Common problems
 
+> **Preferred first troubleshooting step (first action when Linux suddenly stops connecting)**:
+> ```bash
+> sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth   # check lsusb for vid:pid if not 33fa:0012
+> .venv/bin/python miband_client.py --doctor
+> ```
+> **Why try this first (before toggling `power off/on` or deleting pairing)**:
+> 1. **Clears hardware radio hangs directly**: USB adapters such as BARROT `33fa:0012` can lock their internal BLE scan/radio state machine so HCI still responds while `air_events == 0` (`other BLE=0`); `bluetoothctl power off/on` cannot fix this, whereas `usbreset` cold-resets the dongle firmware;
+> 2. **Non-destructive to your bond**: `systemctl restart bluetooth` cleanly rebinds `bluetoothd` to `hci0` and clears stale D-Bus state while **keeping** your cached `Paired / Bonded / Trusted` keys and GATT table intact;
+> 3. **Immediate readiness confirmation via `--doctor`**: verifies `powered=yes`, `paired=yes trusted=yes`, and `connected=no` before reconnecting (note that other Bluetooth peripherals on the host will briefly disconnect).
+
 | Symptom | Handling |
 |---|---|
 | `org.bluez was not provided` / `No Bluetooth adapters found` | The `bluetooth` service is not running or there is no adapter; WSL2 does not support Bluetooth, use native Linux |

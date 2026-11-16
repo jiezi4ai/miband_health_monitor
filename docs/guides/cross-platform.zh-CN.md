@@ -136,6 +136,16 @@ MIBAND_BLUEZ_AGENT=1 .venv/bin/python miband_client.py 60 --log-level INFO
 
 ### 2.4 常见问题
 
+> **排查首选（Linux 突然连不上/扫不到时第一步执行）**：
+> ```bash
+> sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth   # 若非 33fa:0012 请先用 lsusb 查 vid:pid
+> .venv/bin/python miband_client.py --doctor
+> ```
+> **为什么将其作为首选（优于重启程序、`power off/on` 或删配对）**：
+> 1. **直接解除射频假死**：BARROT `33fa:0012` 等 USB 适配器在扫描竞态或异常断链后会出现“HCI 命令仍回复，但空口广播完全聋掉（`other BLE=0`）”的硬件状态机卡死，D-Bus `Powered=false/true` 实测无效，只有 `usbreset` 能冷清零芯片寄存器；
+> 2. **零破坏且保留现有配对**：`systemctl restart bluetooth` 让 `bluetoothd` 重新接管 `hci0` 并清除 D-Bus 僵死状态，同时**不会删除**磁盘上现有的 `Paired / Bonded / Trusted` 密钥与 GATT 缓存；
+> 3. **`--doctor` 立刻确认就绪**：确认 `powered=yes`、`paired=yes trusted=yes`、`connected=no` 后即可直接开跑（注意操作会短暂断开主机其他蓝牙外设）。
+
 | 现象 | 处理 |
 |---|---|
 | `org.bluez was not provided` / `No Bluetooth adapters found` | `bluetooth` 服务未运行或无适配器；WSL2 不支持蓝牙，请用原生 Linux |

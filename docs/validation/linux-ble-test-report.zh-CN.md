@@ -88,12 +88,16 @@
 
 ## 5. 未来常见问题与系统化 Debug 思路
 
-### 5.1 每次动手排查前的“状态基线检查”（10 秒完成）
+### 5.1 每次动手排查前的“首选复位与状态基线检查”
 
-在怀疑代码或蓝牙栈有问题前，先运行以下三条命令确立事实基线：
+若遇到连接突然卡死、扫描持续 `other BLE=0` 或连续重试无果，**优先把硬件级 USB 复位 + 重启蓝牙栈 + `--doctor` 检查作为排查第一步**（不会清空已有配对密钥与 GATT 缓存，比直接删配对或 `power off/on` 更安全有效）：
 
 ```bash
-# 1. 确认手机蓝牙已关闭 / Zepp Life 未在后台占链，并跑环境自检
+# 0. 首选快速复位与核验（会短暂断开本机其他蓝牙外设；非 33fa:0012 请先用 lsusb 查 vid:pid）
+sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth
+.venv/bin/python miband_client.py --doctor
+
+# 1. 若仅做只读基线检查：确认手机蓝牙已关闭 / Zepp Life 未在后台占链
 python3 miband_client.py --doctor
 
 # 2. 查看 BlueZ 对象四状态（关注 Paired / Bonded / Trusted / Connected）

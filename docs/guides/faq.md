@@ -6,6 +6,15 @@ Look up by symptom; see [cross-platform.md](cross-platform.md) for platform deta
 
 ## Connection and scanning
 
+> **First troubleshooting step when Linux fails to connect (recommended first try)**:
+> If phone Bluetooth is already off yet Linux still cannot connect (especially when scan heartbeats show `other BLE=0` or `-112`), reset the USB adapter at the bus level, restart `bluetoothd`, and verify readiness with `--doctor`:
+> ```bash
+> sudo usbreset 33fa:0012 && sudo systemctl restart bluetooth
+> .venv/bin/python miband_client.py --doctor
+> ```
+> (If you use a different USB dongle than BARROT `33fa:0012`, replace it with your adapter's `<vid:pid>` from `lsusb`.)
+> **Why this works**: `usbreset` cold-resets the adapter's stalled BLE radio/scanning state machine (D-Bus `bluetoothctl power off/on` cannot clear firmware state), `systemctl restart bluetooth` rebinds `bluetoothd` to the re-enumerated `hci0` and clears stale D-Bus state while **preserving** your existing on-disk `Paired / Trusted` bond and GATT cache, and `--doctor` confirms `powered=yes`, intact pairing, and no stuck `connected=yes`. (Note: other connected Bluetooth peripherals on the host will briefly disconnect.)
+
 | Symptom | Cause / handling |
 |---|---|
 | `No Bluetooth adapters found` / `org.bluez was not provided` | No Bluetooth stack on the machine (e.g. WSL2 without passthrough, `bluetooth` service not started). Install/start BlueZ, or pass through a USB adapter. |

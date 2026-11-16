@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from storage import _SCHEMA
 
-BASE = datetime(2026, 11, 7, 23, 30).timestamp()
+BASE = (datetime.now() - timedelta(days=2)).replace(
+    hour=23, minute=30, second=0, microsecond=0
+).timestamp()
 
 
 def make_db(tmp_path, *, activity=(), heart_rate=(), spo2=(), name="mi_band.db"):
