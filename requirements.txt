@@ -11,3 +11,6 @@ requests>=2.31.0
 # Test tooling
 pytest>=8.0.0
 pytest-asyncio>=0.23.0
+
+# Windows zoneinfo needs the IANA tz database as a separate package
+tzdata; sys_platform == "win32"
