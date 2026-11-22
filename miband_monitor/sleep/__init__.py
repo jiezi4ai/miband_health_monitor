@@ -98,6 +98,12 @@ from .constants import (
 from .detection import detect_nonwear_spans, detect_sessions
 from .report import _format_report
 from .samples import (
+    BAND_ACTIVE,
+    BAND_CODES,
+    BAND_NONWEAR,
+    BAND_REST,
+    BAND_SLEEP,
+    activity_band,
     is_asleep_minute,
     is_awake,
     is_movement,
@@ -161,6 +167,12 @@ __all__ = [
     "HR_MIN",
     "HR_MAX",
     "kind_code",
+    "BAND_REST",
+    "BAND_ACTIVE",
+    "BAND_SLEEP",
+    "BAND_NONWEAR",
+    "BAND_CODES",
+    "activity_band",
     "is_nonwear",
     "is_sleep_kind",
     "is_movement",

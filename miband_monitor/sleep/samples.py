@@ -17,6 +17,24 @@ from typing import Optional
 from miband_monitor.history.protocol import resolve_band_tz
 from miband_monitor.storage.schema import ACTIVITY_HISTORY_COLUMNS, ACTIVITY_HISTORY_TABLE
 
+# ---------------------------------------------------------------------------
+# Canonical activity-band codes (B-9 single point)
+# ---------------------------------------------------------------------------
+# The offline dashboard's coarse band (rest/active/sleep/not-worn) is a *display*
+# category distinct from the raw band ``kind`` byte, but it has exactly one home.
+# Both the Python packager and the bundled JavaScript read these codes, so the
+# "not worn" band can never drift into a different colour or number.
+BAND_REST, BAND_ACTIVE, BAND_SLEEP, BAND_NONWEAR = 0, 1, 2, 3
+
+#: Exposed in the dashboard payload so the JS renderer never hardcodes ``3``.
+BAND_CODES: dict[str, int] = {
+    "REST": BAND_REST,
+    "ACTIVE": BAND_ACTIVE,
+    "SLEEP": BAND_SLEEP,
+    "NONWEAR": BAND_NONWEAR,
+}
+
+
 from .constants import (
     AWAKE_STEPS,
     HR_MAX,
@@ -106,6 +124,23 @@ def is_asleep_minute(sample: dict) -> bool:
     return not is_nonwear(sample.get("kind", 0)) and not is_awake(sample)
 
 
+def activity_band(sample: dict, *, in_sleep: bool = False) -> int:
+    """Classify one minute into the canonical display band (``BAND_*``).
+
+    The ordering matters: ``is_nonwear`` is checked first because a night the
+    band spent off-wrist lives in the same ``0xF0`` family as real sleep. This
+    is the single source of the kind->band mapping; the offline dashboard used
+    to repeat the same if/elif chain in its packager.
+    """
+    if is_nonwear(sample.get("kind", 0)):
+        return BAND_NONWEAR
+    if in_sleep:
+        return BAND_SLEEP
+    if is_movement(sample):
+        return BAND_ACTIVE
+    return BAND_REST
+
+
 def usable_heart_rate(sample: dict) -> Optional[int]:
     """Return the heart rate, or ``None`` when the band had no measurement."""
     value = int(sample.get("heart_rate", HR_UNAVAILABLE))
@@ -135,6 +170,12 @@ def load_samples(
     With ``include_scores`` the trailing ``sleep`` / ``deep_sleep`` / ``rem_sleep``
     raw bytes are carried along too, for :func:`score_estimates`. They are off by
     default so the sample dict stays the five fields every other caller expects.
+
+    Repeated minutes are collapsed by ``ts``. The JSONL writer de-duplicates only
+    against *its own* file, so a run that writes SQLite without the JSONL check
+    (or two databases merged by hand) can leave the same minute in the table
+    twice. One row per minute is a hard invariant of the band data: without this
+    the duplicated minutes double the in-bed total and inflate every aggregate.
     """
     path = Path(db_path)
     if not path.is_file():
@@ -155,8 +196,12 @@ def load_samples(
         conn.close()
 
     samples = []
+    seen: set[float] = set()
     for row in rows:
         ts, kind, intensity, steps, hr = row[:5]
+        if ts in seen:
+            continue
+        seen.add(ts)
         sample = {"ts": float(ts), "kind": int(kind), "intensity": int(intensity),
                   "steps": int(steps), "heart_rate": int(hr)}
         if include_scores:

@@ -103,8 +103,31 @@ class FetchDataType(IntEnum):
     """Band-side history types (subset relevant to this project)."""
 
     ACTIVITY = 0x01
+    #: Gadgetbridge type 0x05 -- per-workout summaries. Probed 2026-11-20 on a
+    #: real Mi Band 6: accepted with 320 records and a real timestamp, so the
+    #: band *does* produce them. No parser exists yet (B-12, stage 4).
+    SPORTS_SUMMARIES = 0x05
+    #: Gadgetbridge type 0x06 -- per-workout detail/track. The start-date reply
+    #: returns status 0x02 on its own: it needs a specific summary id first.
+    SPORTS_DETAILS = 0x06
     SPO2_NORMAL = 0x25
     SPO2_SLEEP = 0x26
+    #: Gadgetbridge type 0x0d -- PAI. Probed 2026-11-20: accepted, 102 bytes =
+    #: one 102-byte snapshot record (not a history series), self-consistent
+    #: (``paiToday`` equals the sum of its three components). B-13 scope.
+    PAI = 0x0D
+    #: Gadgetbridge type 0x12 -- manually triggered stress readings. Probed
+    #: 2026-11-20 one code per connection: accepted, 0 records (no manual
+    #: measurement was ever taken), so nothing to parse.
+    STRESS_MANUAL = 0x12
+    #: Gadgetbridge type 0x13 -- automatic stress, one byte per minute. Probed
+    #: 2026-11-20: 5761 minutes of real data. This is the only derived-metric
+    #: channel besides PAI that carries anything on this firmware.
+    STRESS_AUTOMATIC = 0x13
+    #: Gadgetbridge type 0x2c -- daily statistics (PAI/stress/respiratory-rate/
+    #: max-HR family). Probed 2026-11-20: accepted but zero records. B-13 stays
+    #: suspended until a probe on a newer firmware reports data.
+    STATISTICS = 0x2C
     #: Sleep sessions (594-byte records with real stage spans and a score).
     #: Gadgetbridge keeps it behind ``supportsSleepScore()``, which a Mi Band 6
     #: does not advertise, and the hardware agrees: the band answers this type

@@ -26,9 +26,14 @@ class HistorySyncResult:
     activity: list[dict] = field(default_factory=list)
     #: Opt-in stream with its own table (layout verified, field semantics unknown).
     spo2_sleep: list[dict] = field(default_factory=list)
+    #: Band-side workout summaries (0x05, B-12); one record per fetch round.
+    sports: list[dict] = field(default_factory=list)
+    #: Automatic stress (0x13), one reading per measured minute.
+    stress: list[dict] = field(default_factory=list)
     rounds: dict[str, int] = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
 
     @property
     def total_samples(self) -> int:
-        return len(self.spo2) + len(self.activity) + len(self.spo2_sleep)
+        return (len(self.spo2) + len(self.activity) + len(self.spo2_sleep)
+                + len(self.sports) + len(self.stress))

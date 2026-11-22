@@ -12,6 +12,8 @@ from __future__ import annotations
 import struct
 
 from .models import HistoryParseError
+from .pai_parser import parse_pai
+from .stress_parser import parse_stress_auto
 from .protocol import (
     ACTIVITY_SAMPLE_SIZE,
     SPO2_RECORD_SIZE,
@@ -20,6 +22,7 @@ from .protocol import (
     FetchDataType,
     logger,
 )
+from .summary_parser import parse_sports_summary
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +144,13 @@ def _parse_payload(
         return parse_spo2_sleep(payload)
     if data_type == FetchDataType.ACTIVITY:
         return parse_activity(payload, start_timestamp)
+    if data_type == FetchDataType.SPORTS_SUMMARIES:
+        # One fetch round returns exactly one summary record.
+        return [parse_sports_summary(payload)]
+    if data_type == FetchDataType.PAI:
+        return parse_pai(payload)
+    if data_type == FetchDataType.STRESS_AUTOMATIC:
+        return parse_stress_auto(payload, start_timestamp)
     raise HistoryParseError(f"no parser for fetch data type {int(data_type):#04x}")
 
 
