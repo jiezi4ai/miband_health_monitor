@@ -161,7 +161,7 @@
 ### 现状（实测，2026-11-19）
 
 `tools/check_privacy.py` 报 **37 项 FAIL**，全部来自未跟踪、未忽略的
-[temp/wsl_test/](../temp/wsl_test/)：
+`temp/wsl_test/`（本地工作目录，刻意不入库）：
 
 - 真实设备地址（手环、外接 dongle，以及扫描时撞见的邻居 BLE 设备）；
 - 个人家目录路径（`.setup-env.sh`、进度报告、验证脚本）。
