@@ -79,6 +79,8 @@ async def test_demo_end_to_end_writes_jsonl_and_sqlite(tmp_path):
         "spo2",
         "activity_history",
         "spo2_sleep",
+        "activity_summary",
+        "stress",
     }
     for table, (path, rows) in exported.items():
         assert path.exists(), table

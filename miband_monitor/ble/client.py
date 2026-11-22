@@ -39,6 +39,7 @@ from .auth_state import AuthStateMixin
 from .backends import BleakClient, BleakScanner
 from .battery import BatteryMixin
 from .chunked import write_chunked_value  # noqa: F401  (lazy test/patch seam)
+from .device_state import DeviceState, DeviceStateMachine
 from .discovery import DiscoveryMixin
 from .identity import normalize_auth_key
 from .link import LinkMixin
@@ -47,6 +48,8 @@ from .mtu import MtuMixin
 from .notifications import NotificationMixin
 from .protocol import MAX_REASSEMBLY_BYTES
 from .streams import StreamMixin
+from .time_sync import TimeSyncMixin
+from .transactions import GattTransactionQueue, TransactionAborted, TransactionBuilder
 
 
 @dataclass
@@ -59,6 +62,8 @@ class StreamCallbacks:
     history_spo2: Optional[Callable[[dict], None]] = None
     history_activity: Optional[Callable[[dict], None]] = None
     history_spo2_sleep: Optional[Callable[[dict], None]] = None
+    history_sports: Optional[Callable[[dict], None]] = None
+    history_stress: Optional[Callable[[dict], None]] = None
 
 
 class MiBand6Client(
@@ -70,6 +75,7 @@ class MiBand6Client(
     AuthConnectMixin,
     AuthHandshakeMixin,
     BatteryMixin,
+    TimeSyncMixin,
     NotificationMixin,
     StreamMixin,
 ):
@@ -149,6 +155,13 @@ class MiBand6Client(
         self._step2_sent = False
 
         self._gatt_lock = asyncio.Lock()
+        # B-5: transaction queue built on the SAME lock (no competing lock).
+        # Existing write paths are unchanged; new code can group ordered GATT
+        # actions into one abortable, serialized transaction.
+        self.gatt_queue = GattTransactionQueue(self._gatt_lock)
+        # B-4: device lifecycle state machine. The publish hook is attached by
+        # the runner (to hub.publish_event) so BLE stays dashboard-agnostic.
+        self.device_state = DeviceStateMachine()
         self._pairing_agent: Optional[bluez.BlueZPairingAgent] = None
         #: BlueZ device paths already marked Trusted in this session.
         self._trusted_paths: set[str] = set()
@@ -172,3 +185,24 @@ class MiBand6Client(
     async def wait_until_disconnected(self) -> None:
         """Block until the link watchdog (or disconnect) fires."""
         await self._disconnected.wait()
+
+    async def run_transaction(self, builder: TransactionBuilder) -> list:
+        """Run an ordered GATT transaction through the serialized queue.
+
+        The underlying bleak client is passed to each action; actions never
+        re-acquire ``_gatt_lock`` themselves (the queue holds it for the group).
+        A failed action aborts the whole transaction with
+        :class:`TransactionAborted`; a transient link error is retried with
+        bounded exponential backoff.
+        """
+        if self.client is None:
+            raise RuntimeError("Client is not connected")
+        return await self.gatt_queue.run(builder.build(), self.client)
+
+    def attach_event_publisher(self, publish: Callable[[str, dict], None]) -> None:
+        """Attach the shared event sink (``hub.publish_event``) for device events."""
+        self.device_state._publish = publish
+
+    def set_device_state(self, state: DeviceState) -> None:
+        """Transition the device state machine (B-4)."""
+        self.device_state.transition(state)

@@ -21,14 +21,29 @@ Usage:
 
     ./.venv/Scripts/python.exe tools/calibrate_sleep.py --zepp data/zepp_nights.json
 
-Night identity follows Zepp Life: a night belongs to the date you went to sleep
-on, so ``2020-01-06`` means the session that started on the evening of the 6th.
+Night identity is the evening the session started on, which is also how the
+band's own sessions are keyed: ``2026-11-13`` means the sleep that began on the
+evening of the 13th and ended on the morning of the 14th.
+
+Zepp Life dates that same page **one day later**: its header is the morning you
+woke up. Confirmed against hardware on 2026-11-20 -- the newest entry is headed
+"11月20日 / 昨晚睡眠" although it starts at 22:28 on the 19th, and the seven
+November pages line up with our sessions only when shifted by a day (four of the
+seven end within one minute of the band's own session end). So subtract one day
+from the page header when writing this file.
 """
 
 from __future__ import annotations
 
 from typing import Any, Optional
 
+from .night_match import (
+    find_session,
+    local_date as _local_date,
+    nonwear_minutes,
+    overlap_minutes as _overlap_minutes,
+    window_bounds as _window_bounds,
+)
 from .samples import load_samples, usable_heart_rate
 from .session import analyze
 
@@ -88,59 +103,6 @@ MODELS = {
 
 
 # ---------------------------------------------------------------------------
-# Night lookup
-# ---------------------------------------------------------------------------
-def _local_date(timestamp: float) -> str:
-    from datetime import datetime
-
-    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
-
-
-def find_session(result: dict, date: str) -> Optional[Any]:
-    for session in result["_sessions"]:
-        if _local_date(session.start) == date:
-            return session
-    return None
-
-
-def nonwear_minutes(result: dict, date: str) -> int:
-    """Minutes of ``0xF3`` the band recorded on the evening of *date*."""
-    return sum(
-        span["minutes"]
-        for span in result.get("not_worn", [])
-        if span.get("start", "").startswith(date)
-    )
-
-
-def _window_bounds(night: dict) -> Optional[tuple[float, float]]:
-    """Zepp's in-bed window as epoch seconds.
-
-    The app labels a night by the evening it started, so ``["22:44", "05:11"]``
-    is one night that crosses midnight: an end that is not after the start rolls
-    over to the next day.
-    """
-    window = night.get("window")
-    if not window:
-        return None
-    from datetime import datetime, timedelta
-
-    start = datetime.strptime(f"{night['date']} {window[0]}", "%Y-%m-%d %H:%M")
-    end = datetime.strptime(f"{night['date']} {window[1]}", "%Y-%m-%d %H:%M")
-    if end <= start:
-        end += timedelta(days=1)
-    return start.timestamp(), end.timestamp()
-
-
-def _overlap_minutes(night: dict, session: Any) -> Optional[int]:
-    """How many of the session's minutes fall inside the window Zepp reports."""
-    bounds = _window_bounds(night)
-    if bounds is None:
-        return None
-    low, high = bounds
-    return sum(1 for sample in session.samples if low <= sample["ts"] <= high)
-
-
-# ---------------------------------------------------------------------------
 # Reporting
 # ---------------------------------------------------------------------------
 def report(db: str, nights: list[dict]) -> int:
@@ -164,7 +126,7 @@ def report(db: str, nights: list[dict]) -> int:
     print(f"{'日期':<12}{'Zepp 深/浅/REM/清醒':<26}{'我们的窗口':<22}{'判定'}")
     for night in nights:
         date = night["date"]
-        session = find_session(result, date)
+        session = find_session(result, date, night.get("window"))
         zepp = f"{night['deep_min']}/{night['light_min']}/{night['rem_min']}/{night['awake_min']}"
         if session is None:
             worn = nonwear_minutes(result, date)

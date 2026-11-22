@@ -53,7 +53,9 @@ def test_activity_history_dedup_across_sqlite_and_jsonl_reopen(tmp_path: Path) -
 
 def _make_fake_sysfs(tmp_path: Path, *, control: str, delay_ms: str) -> Path:
     usb_dev = tmp_path / "devices" / "pci0000" / "usb6" / "6-4"
-    bt_iface = usb_dev / "6-4:1.0"
+    # Real sysfs says "6-4:1.0"; ":" is invalid in Windows paths, so the fake
+    # tree uses a platform-neutral name (only usb_node.name "6-4" is asserted).
+    bt_iface = usb_dev / "6-4_1.0"
     (usb_dev / "power").mkdir(parents=True)
     bt_iface.mkdir(parents=True)
     (usb_dev / "idVendor").write_text("0x33fa\n", encoding="utf-8")

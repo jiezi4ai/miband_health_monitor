@@ -137,7 +137,7 @@ async def test_wait_for_bluez_link_grants_services_grace_and_tracks_unresolved_d
 
     monkeypatch.setitem(sys.modules, "dbus_fast", fake_dbus_fast)
     monkeypatch.setitem(sys.modules, "dbus_fast.aio", fake_dbus_aio)
-    monkeypatch.setattr(bluez, "is_bluez_platform", lambda: True)
+    monkeypatch.setattr(bluez.platform, "is_bluez_platform", lambda: True)
     monkeypatch.setattr(
         bluez.devices, "_info_for_address", lambda _objs, _addr: next(states)
     )

@@ -15,7 +15,10 @@ from tools import reset_bt_adapter
 
 def test_detect_usb_vid_pid_walks_sysfs_parents(tmp_path: Path) -> None:
     usb_dev = tmp_path / "devices" / "pci0" / "usb1" / "1-4"
-    bt_iface = usb_dev / "1-4:1.0" / "bluetooth" / "hci0"
+    # Real sysfs calls this interface "1-4:1.0"; ":" is invalid in Windows
+    # paths, so the fake tree uses a platform-neutral name (the walk never
+    # looks at the interface directory itself).
+    bt_iface = usb_dev / "1-4_1.0" / "bluetooth" / "hci0"
     bt_iface.mkdir(parents=True)
     (usb_dev / "idVendor").write_text("33fa\n", encoding="utf-8")
     (usb_dev / "idProduct").write_text("0012\n", encoding="utf-8")

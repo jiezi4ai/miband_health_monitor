@@ -23,6 +23,7 @@ from ..config.defaults import (
     DEFAULT_MTU_MAX,
     DEFAULT_MTU_MIN,
     ENV_AUTH_KEY,
+    ENV_WEB_TOKEN,
 )
 from ..config.env import env_str
 from ..crypto.facade import backend_name as ecdh_backend_name
@@ -32,7 +33,7 @@ from ..history import resolve_band_tz
 from ..storage import TelemetryStore
 from ..storage.export_csv import export_database
 from ..workout import WorkoutSession
-from .args import demo_requested, parse_args
+from .args import demo_requested, maybe_backup, parse_args, time_sync_mode
 from .callbacks import build_callbacks
 from .logging import configure_logging
 from .runner import run_demo, run_monitor
@@ -160,13 +161,14 @@ async def main(argv: Optional[list[str]] = None) -> int:
             logger.error("Invalid AUTH_KEY: %s", exc)
             return 1
 
-    logger.info(
-        "Discovery target: %s%s",
-        device_id,
-        f" (name filter: {device_name!r})" if device_name else "",
-    )
+    name_filter = f" (name filter: {device_name!r})" if device_name else ""
+    logger.info("Discovery target: %s%s", device_id, name_filter)
 
-    store = TelemetryStore(args.output, backend=args.storage)
+    try:
+        store = TelemetryStore(args.output, backend=args.storage)
+    except OSError as exc:
+        logger.error("Output directory %s is not usable: %s", args.output, exc)
+        return 1
 
     hub: Optional[TelemetryHub] = None
     web_server: Optional[DashboardServer] = None
@@ -178,6 +180,7 @@ async def main(argv: Optional[list[str]] = None) -> int:
             host=args.web_host,
             port=args.web_port,
             history_provider=make_db_history_provider(store.db_path),
+            token=os.getenv(ENV_WEB_TOKEN, ""),
         )
         try:
             await web_server.start()
@@ -202,14 +205,11 @@ async def main(argv: Optional[list[str]] = None) -> int:
             hub.publish_workout(workout.snapshot(timeline_limit=300))
 
     callbacks = build_callbacks(store, hub, workout=workout)
+    time_sync = time_sync_mode(args)
     if args.storage == "none":
         logger.info("Storage disabled; telemetry will only be logged.")
     else:
-        logger.info(
-            "Telemetry output: backend=%s -> %s",
-            args.storage,
-            Path(args.output).resolve(),
-        )
+        logger.info("Telemetry output: backend=%s -> %s", args.storage, Path(args.output).resolve())
 
     if not demo and is_bluez_platform():
         warn_usb_autosuspend_preflight(logger)
@@ -225,6 +225,8 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 callbacks=callbacks,
                 sync_history_days=args.sync_history,
                 sync_sleep_spo2=args.sync_sleep_spo2,
+                sync_sports=args.sync_sports,
+                sync_stress=args.sync_stress,
                 band_tz=band_tz,
                 mtu=args.mtu,
                 hr_silence_soft=args.hr_silence_soft,
@@ -232,6 +234,7 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 workout=workout,
                 hub=hub,
                 battery_interval=args.battery_interval,
+                time_sync=time_sync,
             )
         else:
             coro = run_monitor(
@@ -245,6 +248,8 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 reconnect=not args.no_reconnect,
                 sync_history_days=args.sync_history,
                 sync_sleep_spo2=args.sync_sleep_spo2,
+                sync_sports=args.sync_sports,
+                sync_stress=args.sync_stress,
                 band_tz=band_tz,
                 device_name=device_name,
                 mtu=args.mtu,
@@ -254,6 +259,7 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 workout=workout,
                 hub=hub,
                 battery_interval=args.battery_interval,
+                time_sync=time_sync,
             )
         await _run_with_sigterm(coro)
     except KeyboardInterrupt:
@@ -277,6 +283,8 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 logger.debug("Error while stopping the dashboard: %s", exc)
         store.close()
         logger.info("Storage summary: %s", store.stats())
+        if getattr(args, "backup", None) and not maybe_backup(args, store.db_path, logger):
+            exit_code = 1
         if args.export_csv:
             if args.storage in ("sqlite", "both"):
                 try:
@@ -286,8 +294,6 @@ async def main(argv: Optional[list[str]] = None) -> int:
                 except Exception as exc:
                     logger.error("CSV export failed: %s", exc)
             else:
-                logger.warning(
-                    "--export-csv requires --storage sqlite or both (current: %s)",
-                    args.storage,
-                )
+                logger.warning("--export-csv requires --storage sqlite or both (current: %s)",
+                               args.storage)
     return exit_code

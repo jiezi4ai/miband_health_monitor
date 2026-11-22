@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from miband_monitor.bluez import admin, devices, pairing, platform
 from tests.support import MAC
 
@@ -15,6 +17,11 @@ async def test_pairing_agent_lifecycle(monkeypatch):
 
 
 async def test_pairing_agent_start_validates_message_type(monkeypatch):
+    # The reply validation asserts against the real dbus_fast MessageType
+    # enum, which only ships with bleak's Linux backend.
+    pytest.importorskip(
+        "dbus_fast", reason="requires dbus_fast (bleak's Linux D-Bus backend)"
+    )
     monkeypatch.setattr(platform, "is_bluez_platform", lambda: True)
 
     class FakeReply:

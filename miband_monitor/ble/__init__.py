@@ -34,6 +34,7 @@ from .chunked import (
 from .client import MiBand6Client, StreamCallbacks
 from .backends import BleakClient, BleakScanner
 from .crypto import _aes_cbc_encrypt, encrypt_challenge
+from .device_state import DEVICE_EVENT, DeviceState, DeviceStateMachine
 from .discovery import AdapterDeafError
 from .identity import (
     PLACEHOLDER_DEVICE_PREFIXES,
@@ -46,6 +47,15 @@ from .identity import (
 )
 from .link import DIRECT_CONNECT_TIMEOUT
 from .parsers import parse_heart_rate, parse_raw_sensor_data, parse_realtime_steps
+from .transactions import (
+    ActionFailed,
+    CallbackLatch,
+    GattAction,
+    GattTransactionQueue,
+    Transaction,
+    TransactionAborted,
+    TransactionBuilder,
+)
 from .protocol import (
     AUTH_STEP1_PAYLOAD_SIZE,
     AUTH_STEP1_PUBKEY_SIZE,
@@ -150,6 +160,18 @@ __all__ = [
     "write_chunked_value",
     "_resolve_mtu",
     "_write_with_in_progress_retry",
+    # Device lifecycle state machine (B-4)
+    "DEVICE_EVENT",
+    "DeviceState",
+    "DeviceStateMachine",
+    # GATT transactions (B-5)
+    "ActionFailed",
+    "CallbackLatch",
+    "GattAction",
+    "GattTransactionQueue",
+    "Transaction",
+    "TransactionAborted",
+    "TransactionBuilder",
     # Link timing
     "DIRECT_CONNECT_TIMEOUT",
     "DEFAULT_CONNECT_TIMEOUT",

@@ -54,7 +54,7 @@ def _install_dbus_stub(monkeypatch: pytest.MonkeyPatch, call_fn, *, target_path:
 
     monkeypatch.setitem(sys.modules, "dbus_fast", fake_dbus_fast)
     monkeypatch.setitem(sys.modules, "dbus_fast.aio", fake_dbus_aio)
-    monkeypatch.setattr(bluez, "is_bluez_platform", lambda: True)
+    monkeypatch.setattr(bluez.platform, "is_bluez_platform", lambda: True)
     return members
 
 

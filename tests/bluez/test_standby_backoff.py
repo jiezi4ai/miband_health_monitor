@@ -150,7 +150,7 @@ async def test_wait_for_bluez_link_progressive_backoff(
 
     monkeypatch.setitem(sys.modules, "dbus_fast", fake_dbus_fast)
     monkeypatch.setitem(sys.modules, "dbus_fast.aio", fake_dbus_aio)
-    monkeypatch.setattr(bluez, "is_bluez_platform", lambda: True)
+    monkeypatch.setattr(bluez.platform, "is_bluez_platform", lambda: True)
     monkeypatch.setattr(
         bluez.devices,
         "_info_for_address",
@@ -248,7 +248,7 @@ async def test_wait_for_bluez_link_fires_connect_before_introspect_with_device_p
 
     monkeypatch.setitem(sys.modules, "dbus_fast", fake_dbus_fast)
     monkeypatch.setitem(sys.modules, "dbus_fast.aio", fake_dbus_aio)
-    monkeypatch.setattr(bluez, "is_bluez_platform", lambda: True)
+    monkeypatch.setattr(bluez.platform, "is_bluez_platform", lambda: True)
     monkeypatch.setattr(
         bluez.devices,
         "_info_for_address",

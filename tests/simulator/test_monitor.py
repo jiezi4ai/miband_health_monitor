@@ -176,3 +176,45 @@ async def test_run_monitor_history_synced_once_across_reconnects(tmp_path, monke
 
     assert band.connect_count >= 2, "supervisor should reconnect after link loss"
     assert sync_calls == 1, "history should only sync once per supervisor lifecycle"
+
+
+async def test_run_monitor_wakes_sensor_hub_without_imu(tmp_path, monkeypatch):
+    """HR needs the raw sensor hub active even when IMU storage is off."""
+    band = SimulatedBand(auth_key=AUTH_KEY_BYTES)
+    sim_client_factory, _ = simulated_factories(band)
+    scanner_class = _make_scanner(MAC)
+
+    def factory(mac: str, key: str) -> MiBand6Client:
+        return MiBand6Client(
+            mac, key, client_factory=sim_client_factory, scanner_factory=scanner_class
+        )
+
+    raw_starts: list[object] = []
+    original_start = MiBand6Client.start_raw_sensor_stream
+
+    async def record_raw_start(self, callback=None):
+        raw_starts.append(callback)
+        return await original_start(self, callback)
+
+    monkeypatch.setattr(MiBand6Client, "start_raw_sensor_stream", record_raw_start)
+    store = TelemetryStore(tmp_path, backend="sqlite")
+    callbacks = StreamCallbacks(
+        heart_rate=store.record_heart_rate,
+        steps=store.record_steps,
+        imu=store.record_imu,
+    )
+    try:
+        await run_monitor(
+            MAC,
+            AUTH_KEY,
+            duration=0.6,
+            imu=False,
+            callbacks=callbacks,
+            scan_timeout=2.0,
+            reconnect=False,
+            client_factory=factory,
+        )
+    finally:
+        store.close()
+
+    assert raw_starts == [None], "sensor hub must be started without IMU storage"

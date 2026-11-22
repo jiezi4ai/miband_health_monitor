@@ -30,7 +30,9 @@ def _make_usb_bt_sysfs(
     product_id: str = "0012",
 ) -> Path:
     usb_dev = tmp_path / "devices" / "pci0000" / "usb1" / "1-1"
-    bt_iface = usb_dev / "1-1:1.0"
+    # Real sysfs says "1-1:1.0"; ":" is invalid in Windows paths, so the fake
+    # tree uses a platform-neutral name (never inspected by the code under test).
+    bt_iface = usb_dev / "1-1_1.0"
     (usb_dev / "power").mkdir(parents=True)
     bt_iface.mkdir(parents=True)
     (usb_dev / "idVendor").write_text(f"{vendor_id}\n", encoding="utf-8")

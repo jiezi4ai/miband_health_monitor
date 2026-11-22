@@ -7,7 +7,9 @@ and ad-hoc imports keep working.
 
 Usage:
 
-    ./.venv/Scripts/python.exe tools/calibrate_sleep.py --zepp data/zepp_nights.json
+    python tools/calibrate_sleep.py --zepp data/zepp_nights.json
+
+(after activating your venv: Linux .venv/bin/python, Windows .venv\\Scripts\\python.exe)
 """
 
 from __future__ import annotations

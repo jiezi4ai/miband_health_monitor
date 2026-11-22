@@ -97,7 +97,7 @@ async def test_wait_for_bluez_link_exits_early_on_two_unresolved_drops(
 
     monkeypatch.setitem(sys.modules, "dbus_fast", fake_dbus_fast)
     monkeypatch.setitem(sys.modules, "dbus_fast.aio", fake_dbus_aio)
-    monkeypatch.setattr(bluez, "is_bluez_platform", lambda: True)
+    monkeypatch.setattr(bluez.platform, "is_bluez_platform", lambda: True)
     monkeypatch.setattr(bluez.devices, "_info_for_address", lambda _objs, _addr: next(states))
     monkeypatch.setattr("miband_monitor.bluez.link.asyncio.get_running_loop", _LoopProxy)
 
