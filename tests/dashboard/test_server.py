@@ -8,12 +8,13 @@ import json
 from dashboard import DashboardServer, TelemetryHub
 
 
-async def _http_get(port: int, path: str, timeout: float = 3.0):
+async def _http_get(port: int, path: str, timeout: float = 3.0, headers=None):
     """Minimal HTTP/1.1 client: returns (status, headers, body)."""
     reader, writer = await asyncio.open_connection("127.0.0.1", port)
     try:
+        extra = "".join(f"{name}: {value}\r\n" for name, value in (headers or {}).items())
         request = (
-            f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n"
+            f"GET {path} HTTP/1.1\r\nHost: 127.0.0.1\r\n{extra}Connection: close\r\n\r\n"
         ).encode("latin-1")
         writer.write(request)
         await writer.drain()
@@ -162,5 +163,37 @@ async def test_history_provider_used_for_db_source():
         assert status == 200
         assert calls == [("heart_rate", 5)]
         assert json.loads(body)["rows"][0]["bpm"] == 55
+    finally:
+        await server.stop()
+
+
+async def test_token_gate_requires_token_when_configured():
+    """WEB_TOKEN closes the API/SSE/page, except the liveness probe."""
+    hub = TelemetryHub()
+    server = DashboardServer(hub, host="127.0.0.1", port=0, token="s3cret")
+    await server.start()
+    try:
+        assert (await _http_get(server.port, "/api/snapshot"))[0] == 401
+        assert (await _http_get(server.port, "/api/snapshot?token=wrong"))[0] == 401
+        assert (await _http_get(server.port, "/api/snapshot?token=s3cret"))[0] == 200
+        assert (
+            await _http_get(
+                server.port, "/api/snapshot", headers={"Authorization": "Bearer s3cret"}
+            )
+        )[0] == 200
+        assert (await _http_get(server.port, "/healthz"))[0] == 200
+        assert (await _http_get(server.port, "/"))[0] == 401
+        assert (await _http_get(server.port, "/?token=s3cret"))[0] == 200
+    finally:
+        await server.stop()
+
+
+async def test_token_gate_absent_by_default():
+    """Historical behaviour: no token configured means open loopback access."""
+    hub = TelemetryHub()
+    server = DashboardServer(hub, host="127.0.0.1", port=0)
+    await server.start()
+    try:
+        assert (await _http_get(server.port, "/api/snapshot"))[0] == 200
     finally:
         await server.stop()

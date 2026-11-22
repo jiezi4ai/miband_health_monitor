@@ -25,6 +25,7 @@ ENV_LOG_LEVEL = "LOG_LEVEL"
 ENV_DEMO_MODE = "DEMO_MODE"
 ENV_WEB_PORT = "WEB_PORT"
 ENV_WEB_HOST = "WEB_HOST"
+ENV_WEB_TOKEN = "WEB_TOKEN"
 ENV_HISTORY_DAYS = "HISTORY_DAYS"
 ENV_BAND_TZ = "BAND_TZ"
 ENV_ECDH_BACKEND = "MIBAND_ECDH_BACKEND"
@@ -115,7 +116,8 @@ DEFAULT_HR_SILENCE_SOFT_SECONDS = 24.0
 DEFAULT_HR_SILENCE_HARD_SECONDS = 48.0
 #: Maximum soft re-arm attempts before escalating to hard reconnect.
 DEFAULT_HR_SOFT_REARM_MAX = 2
-#: Best-effort battery level polling interval during workout mode (seconds).
+#: Best-effort battery level polling interval during workout mode, and during
+#: a default session when a dashboard hub is attached (seconds).
 DEFAULT_BATTERY_POLL_SECONDS = 300.0
 #: Minimum disconnect duration (seconds) required to trigger ACTIVITY gap-fill.
 DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS = 60.0

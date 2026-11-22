@@ -13,11 +13,15 @@ GET /api/history      one series: ?kind=heart_rate&limit=600 (JSON);
                       add source=db to read SQLite history instead
 GET /events           Server-Sent Events stream of live samples
 GET /healthz          liveness probe (JSON)
+
+When a token is supplied every endpoint except /healthz requires it via
+``Authorization: Bearer <t>`` or ``?token=<t>``.
 """
 
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 from http import HTTPStatus
 from pathlib import Path
@@ -51,9 +55,13 @@ class DashboardServer:
         index_path: Optional[str | Path] = None,
         history_provider: Optional[Callable[[str, int], List[dict]]] = None,
         controller: Optional[Any] = None,
+        token: Optional[str] = None,
     ) -> None:
         self.hub = hub
         self.host = host
+        #: Optional shared secret. When set, every endpoint except /healthz
+        #: requires it; None keeps the historical unauthenticated behaviour.
+        self.token = (token or "").strip() or None
         self._requested_port = int(port)
         #: None means: serve the page composed from miband_monitor/dashboard/assets.
         #: A path is honoured as an override (missing/unreadable -> fallback page).
@@ -75,6 +83,12 @@ class DashboardServer:
         return f"http://{self.host}:{self._port}"
 
     async def start(self) -> None:
+        if self.token is None and self.host not in ("127.0.0.1", "localhost", "::1"):
+            logger.warning(
+                "Dashboard bound to %s without WEB_TOKEN: anyone who can reach this "
+                "port can read your health data. Set WEB_TOKEN or bind 127.0.0.1.",
+                self.host,
+            )
         self._server = await asyncio.start_server(
             self._handle_client_task, self.host, self._requested_port
         )
@@ -157,6 +171,16 @@ class DashboardServer:
             path, _, query = target.partition("?")
             params = parse_qs(query)
 
+            if (
+                self.token is not None
+                and path != "/healthz"
+                and not self._request_authorized(headers, params)
+            ):
+                await send_json(
+                    writer, HTTPStatus.UNAUTHORIZED, {"error": "missing or invalid token"}
+                )
+                return
+
             if path.startswith("/api/gui/"):
                 await handle_gui_request(
                     self.controller, method, path, headers, reader, writer
@@ -193,6 +217,14 @@ class DashboardServer:
                 await writer.wait_closed()
             except (ConnectionError, OSError):
                 pass
+
+    def _request_authorized(self, headers: Dict[str, str], params: dict) -> bool:
+        """True when the request carries the configured token, if any."""
+        auth = headers.get("authorization", "")
+        if auth.startswith("Bearer ") and hmac.compare_digest(auth[7:].strip(), self.token):
+            return True
+        supplied = (params.get("token") or [""])[0]
+        return bool(supplied) and hmac.compare_digest(supplied, self.token)
 
     def _index_bytes(self) -> bytes:
         """Read the configured override page, or use the composed assets page."""

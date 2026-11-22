@@ -6,12 +6,18 @@ import argparse
 import asyncio
 import contextlib
 import logging
+import os
 import signal
 import webbrowser
 from typing import Optional
 
 from ..cli.logging import configure_logging
-from ..config.defaults import DEFAULT_DATA_DIR, DEFAULT_LOG_LEVEL, DEFAULT_WEB_HOST
+from ..config.defaults import (
+    DEFAULT_DATA_DIR,
+    DEFAULT_LOG_LEVEL,
+    DEFAULT_WEB_HOST,
+    ENV_WEB_TOKEN,
+)
 from ..config.env import load_env, secure_env_file
 from ..dashboard import DashboardServer, TelemetryHub, make_db_history_provider
 from ..storage.schema import STORAGE_BACKENDS
@@ -64,6 +70,7 @@ async def run_gui_server(
         port=port,
         history_provider=make_db_history_provider(db_path),
         controller=controller,
+        token=os.getenv(ENV_WEB_TOKEN, ""),
     )
 
     stop_event = asyncio.Event()

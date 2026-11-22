@@ -98,6 +98,20 @@ async def run_doctor(
             hint=chmod_hint,
         )
 
+    # --- dashboard exposure (advisory; see improvement plan R-7) ------------
+    web_host = os.getenv("WEB_HOST", "").strip() or "127.0.0.1"
+    web_token = os.getenv("WEB_TOKEN", "").strip()
+    if web_host not in ("127.0.0.1", "localhost", "::1"):
+        if web_token:
+            report.add(OK, "dashboard", f"WEB_HOST={web_host} with WEB_TOKEN set")
+        else:
+            report.add(
+                WARN,
+                "dashboard",
+                f"WEB_HOST={web_host} exposes the dashboard beyond loopback without a token",
+                hint="set WEB_TOKEN in .env, then open the page with ?token=...",
+            )
+
     # --- output directory -------------------------------------------------
     from miband_monitor.config.security import secure_directory
 
