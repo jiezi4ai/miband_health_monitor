@@ -25,11 +25,14 @@ Record layout, from HuamiSleepSessionSampleProvider.SleepSession:
 
 Run with the band awake and nearby:
 
-    ./.venv/Scripts/python.exe tools/probe_sleep_session.py
+    python tools/probe_sleep_session.py
+
+(after activating your venv: Linux .venv/bin/python, Windows .venv\\Scripts\\python.exe)
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import struct
 import sys
@@ -43,7 +46,11 @@ from miband_monitor.ble import (  # noqa: E402
     _env_device_id,
     is_placeholder_device_id,
 )
-from miband_monitor.config.defaults import DEFAULT_HISTORY_DAYS, ENV_AUTH_KEY  # noqa: E402
+from miband_monitor.config.defaults import (  # noqa: E402
+    DEFAULT_HISTORY_DAYS,
+    DEFAULT_SCAN_TIMEOUT,
+    ENV_AUTH_KEY,
+)
 from miband_monitor.config.env import env_str, load_env  # noqa: E402
 from miband_monitor.config.privacy import mask_address  # noqa: E402
 from miband_monitor.history import (  # noqa: E402
@@ -92,7 +99,17 @@ def parse_sleep_session(record: bytes) -> dict:
     }
 
 
-async def main() -> int:
+async def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Probe the band for the Huami SLEEP_SESSION history type (0x48)."
+    )
+    parser.add_argument(
+        "--scan-timeout",
+        type=float,
+        default=DEFAULT_SCAN_TIMEOUT,
+        help="seconds to wait for the band's advertising pulse (default: %(default)s)",
+    )
+    args = parser.parse_args(argv)
     load_env()
     mac = _env_device_id()
     key = env_str(ENV_AUTH_KEY)
@@ -100,7 +117,7 @@ async def main() -> int:
         print("DEVICE_ID / AUTH_KEY missing from .env")
         return 2
 
-    client = MiBand6Client(mac, key)
+    client = MiBand6Client(mac, key, scan_timeout=args.scan_timeout)
     fetcher = BandHistoryFetcher(client)
     since = datetime.now() - timedelta(days=DEFAULT_HISTORY_DAYS)
 
@@ -150,4 +167,4 @@ async def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(asyncio.run(main()))
+    raise SystemExit(asyncio.run(main(sys.argv[1:])))
