@@ -24,14 +24,17 @@
 | 血氧 SpO₂ | 从手环侧历史记录拉取（需 `--sync-history`，已真机验证） |
 | 历史活动数据 | 每分钟活动强度/步数/心率/睡眠标志（需 `--sync-history`，已真机验证） |
 | 睡眠血氧 0x26 | `--sync-sleep-spo2` 拉取整夜血氧（30B 布局**已真机验证**，一夜 430 条），写入**独立** `spo2_sleep` 表 + JSONL + CSV；离线看板画整夜曲线，与点测 `0x25` 完全隔离 |
+| 运动总结 0x05 | `--sync-sports` 抓取手环侧运动总结（类型/时长/步数/距离/卡路里/平均与最大心率），写入独立 `activity_summary` 表 + JSONL + CSV；Band 6 无 GPS，不抓轨迹 |
+| 下行校时 | `--sync-time` 把手环时钟写到标准 CTS `0x2A2B`；`--sync-time-dry-run` 只读漂移不写，失败不阻断会话 |
 | 本地历史报告 | `history_report.py` 汇总 SQLite 中的心率/血氧/活动数据，支持文本与 JSON |
 | 睡眠推导 | `sleep_analysis.py`：用 `kind` 状态机判定睡眠窗口，再按心率水平与心率变异性排序区分深睡 / 浅睡（**推导值**，不输出 REM；手环不直接上报分期） |
-| 离线历史看板 | `history_dashboard.py` 生成**单文件 HTML**：KPI、睡眠结构图、心率、活动节律、步数、整夜血氧曲线、点测血氧表；无外部资源，可离线打开或原样分享 |
+| 离线历史看板 | `history_dashboard.py` 生成**单文件 HTML**：KPI（最近一晚 / 周 / 月 / 全库可切换）、睡眠结构图、心率、活动节律、**同轴视图**（步数柱 + 心率线 + 睡眠/未佩戴色带）、步数、整夜血氧曲线、点测血氧表；无外部资源，可离线打开或原样分享 |
+| 实时看板 | SSE 实时推送心率/血氧/步数/IMU，并显示**手环电量**与设备连接状态；开启 `--web-port` 时普通会话也轮询电量 |
 | 时间戳 / 持久化 | 每条记录带 Unix 秒 + UTC ISO-8601 毫秒时间；JSONL 追加写 + SQLite WAL，可任选或同时 |
 | CSV 导出 | 从 SQLite 导出 6 张 CSV 表 |
 | 自动重连 | 会话失败/链路丢失后指数退避重连；心率保活失败也会触发重连 |
 | 无硬件演示 | `--demo` 使用内置模拟手环跑通完整链路（认证、数据流、历史同步、落盘、导出） |
-| 测试 | 270+ 单元/集成测试，含模拟 BLE 后端，**不需要真实手环**；CI 覆盖 Linux/Windows/macOS |
+| 测试 | 390+ 单元/集成测试，含模拟 BLE 后端，**不需要真实手环**；CI 覆盖 Linux/Windows/macOS |
 
 ---
 
@@ -136,8 +139,10 @@ cp .env.example .env          # 填入 DEVICE_ID（MAC 或 macOS UUID）与 AUTH
 ```
 
 `.env` 已被 git 忽略并会被收紧到 0600。完整变量表见
-[docs/guides/configuration.md](docs/guides/configuration.zh-CN.md)；没有 `AUTH_KEY` 时可用
-`get_auth_key.py` / `fetch_by_token.py` 获取。
+[docs/guides/configuration.md](docs/guides/configuration.zh-CN.md)；没有 `AUTH_KEY` 时建议用
+`fetch_by_token.py`（首选——浏览器 token 路线，不受小米 2FA 影响）获取，
+`get_auth_key.py`（兜底；其小米路径当前已被 2FA 拦断）作为备选。
+详见 [configuration §3](docs/guides/configuration.zh-CN.md)。
 
 ### 4.3 自检与无硬件演示
 
@@ -158,6 +163,8 @@ cp .env.example .env          # 填入 DEVICE_ID（MAC 或 macOS UUID）与 AUTH
 .venv/bin/python miband_client.py --export-csv       # 一直采到 Ctrl+C，并导出 CSV
 .venv/bin/python miband_client.py --storage none     # 只看日志不落盘
 .venv/bin/python miband_client.py 60 --sync-history 7 --sync-sleep-spo2
+.venv/bin/python miband_client.py 60 --sync-history 7 --sync-sports   # 运动总结
+.venv/bin/python miband_client.py 5 --sync-time-dry-run --storage none  # 先看手环时钟漂移
 ```
 
 真机要点：**关闭手机蓝牙**；手环无手机链路时每 40–60 秒才发一个广播脉冲，
@@ -173,6 +180,7 @@ cp .env.example .env          # 填入 DEVICE_ID（MAC 或 macOS UUID）与 AUTH
 .venv/bin/python history_report.py --hours 24                # 文本汇总
 .venv/bin/python sleep_analysis.py --db data/mi_band.db      # 睡眠推导
 .venv/bin/python history_dashboard.py -o history.html --days 7   # 离线单文件看板
+.venv/bin/python history_dashboard.py -o week.html --range week --kpi-range week  # 周粒度同轴视图
 .venv/bin/python export_csv.py --db data/mi_band.db --output data/csv
 ```
 
@@ -228,7 +236,7 @@ cp .env.example .env          # 填入 DEVICE_ID（MAC 或 macOS UUID）与 AUTH
 | 第三方 | 位置 | 许可证 / 说明 |
 |---|---|---|
 | `bleak` | 依赖（requirements.txt） | MIT，BLE 跨平台封装 |
-| `huami_token` | `huami_token/` | MIT，© 2025 Kirill Snezhko，华米/Zepp 云 API 客户端 |
+| `huami_token` | `huami_token/` | MIT，© 2020–2025 Kirill Snezhko，华米/Zepp 云 API 客户端；以上游 v0.8.0 原样 vendoring，见 [`huami_token/VENDORED.md`](huami_token/VENDORED.md) |
 | `tiny-ECDH`（C） | `ecdh.c` / `ecdh.h` | 上游 C 实现，编译为 `libecdh.so` 加速 |
 | `tiny-ECDH-python` | `vendor/tiny_ecdh/` | MIT，© 2023 Daniel Oliveira，纯 Python 回退 |
 | Gadgetbridge（协议参考） | 无代码复制 | AGPL-3.0，仅参考公开逆向的协议事实 |

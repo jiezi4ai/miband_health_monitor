@@ -30,6 +30,7 @@ Source: [miband_monitor/ble/](../../miband_monitor/ble/)
 | `listener.py` | chunked notification subscription and dispatch |
 | `auth_state.py` / `auth_connect.py` / `auth_handshake.py` | authentication events, connection orchestration, challenge-response state machine |
 | `notifications.py` / `streams.py` | heart-rate/steps/IMU notification handling and stream start/stop |
+| `time_sync.py` | `TimeSyncMixin`: CTS `0x2A2B` drift read / clock write (Mi Band 11-byte variant, never aborts) |
 | `client.py` | `MiBand6Client` composes the mixins above while keeping the public class identity and attributes |
 
 ## Public API

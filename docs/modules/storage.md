@@ -9,7 +9,7 @@ Turn every sample from the BLE callbacks into a timestamped persisted row, guara
 - JSONL: one JSON object per line, split into files by stream, appended;
 - SQLite: a single `mi_band.db` (WAL), one table per stream, indexed by `ts`;
 - Background single writer thread: producers only enqueue, the consumer commits in batches;
-- CSV export: exports six tables from SQLite in a fixed column order;
+- CSV export: exports seven tables from SQLite in a fixed column order;
 - Permissions: database/JSONL/directories are tightened to 0600/0700 on POSIX.
 
 Source: [miband_monitor/storage/](../../miband_monitor/storage/)
@@ -18,7 +18,8 @@ Source: [miband_monitor/storage/](../../miband_monitor/storage/)
 
 | File | Contents |
 |---|---|
-| `schema.py` | **Single source of truth**: table/column names, `JSONL_FILENAMES`, `_SCHEMA`, `_INSERT_SQL`, `TABLE_COLUMNS`, `STORAGE_BACKENDS` |
+| `schema.py` | **Single source of truth**: table/column names, `JSONL_FILENAMES`, `_SCHEMA`, `_INSERT_SQL`, `TABLE_COLUMNS`, `STORAGE_BACKENDS`, `SCHEMA_VERSION`/`MIGRATIONS` |
+| `summary_schema.py` | Workout-summary table (0x05, B-12) DDL/columns/INSERT and the v1->v2 migration, keeping `schema.py` under 300 lines |
 | `store.py` | `TelemetryStore`: public sink API, timestamps, queue, `stats`, `close` |
 | `writer.py` | `run_writer_loop` (batch commits, drains the queue after a failure), `QUEUE_POLL_SECONDS` |
 | `sqlite.py` | `open_database` (WAL), `insert_record`, `secure_database_files` |
@@ -36,6 +37,7 @@ Source: [miband_monitor/storage/](../../miband_monitor/storage/)
 | `record_spo2(spo2, auto_measure, timestamp=None)` | Spot-check SpO2 (the band sampling time can be specified) |
 | `record_activity_history(sample, timestamp=None)` | Per-minute activity record |
 | `record_spo2_sleep(sample)` | Overnight SpO2, separate table |
+| `record_activity_summary(sample)` | Band-side workout summary (0x05), replaced by (start,end) pair |
 | `stats()` / `close()` / context manager | Counters, drain the queue, close |
 | `export_database(db_path, output_dir)` / `export_table(...)` | CSV export |
 | Schema constants (`HEART_RATE_TABLE` etc.) | Imported read-only by sleep/offline_dashboard/reports |
@@ -64,7 +66,7 @@ close() ──> enqueue sentinel ──> join (max 10s) ──> statistics
 |---|---|---|
 | `--storage` / `STORAGE_BACKEND` | `both` | `jsonl` / `sqlite` / `both` / `none` |
 | `DB_FILENAME` | `mi_band.db` | SQLite file name under the output directory |
-| `JSONL_FILENAMES` | Six stream files | One-to-one with table names |
+| `JSONL_FILENAMES` | Seven stream files | One-to-one with table names |
 | `COMMIT_BATCH_SIZE` | 200 | SQLite batch commit size |
 | `QUEUE_POLL_SECONDS` | 0.5 | Writer queue polling interval |
 | `CLOSE_JOIN_TIMEOUT` | 10.0 s | Upper bound for `close()` waiting for the writer to exit |
@@ -80,6 +82,7 @@ close() ──> enqueue sentinel ──> join (max 10s) ──> statistics
 | `spo2` | `ts, iso_time, spo2, auto_measure` |
 | `activity_history` | `kind, intensity, steps, heart_rate, unknown1, sleep, deep_sleep, rem_sleep` |
 | `spo2_sleep` | `spo2, duration, spo2_high/low, signal_quality, extend` (trailing bytes as JSON text) |
+| `activity_summary` | Workout summary: `end_ts, duration_s, kind_code/name, steps, active_seconds, calories, distance_m, average/max/min_hr, average_pace_s_km, version, has_gps`; unique `(ts,end_ts)` |
 
 Field-level formats see [guides/data-formats.md](../guides/data-formats.md).
 

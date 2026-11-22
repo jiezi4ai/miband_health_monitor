@@ -18,23 +18,28 @@
 |---|---|
 | `constants.py` | 时间窗口、阶段顺序/标签、数据源标记、`SPO2_SLEEP_JSONL` |
 | `strings.py` | KPI 标签与页面文案（保持历史输出字符串不变） |
-| `sources.py` | 探测/读取 SQLite 表与 `spo2_sleep.jsonl`，列名来自 storage schema |
+| `sources.py` | 探测/读取 SQLite 表（含 0x05 运动总结）与 `spo2_sleep.jsonl`，列名来自 storage schema |
 | `collect.py` | 组装活动/心率/血氧/睡眠序列并做时间窗口过滤 |
 | `packaging.py` | 打包 `DATA`、阶段样式等模板变量 |
-| `kpis.py` | KPI 计算（最近一晚、深睡占比、睡眠效率、步数、心率区间、血氧最低） |
-| `svg.py` | 睡眠分期图（run-length 压缩、按真实时间戳定位） |
+| `combined.py` | 同轴分桶（活动柱 / 心率线 / 睡眠色带共用一条时间轴） |
+| `ranges.py` | `day`/`week`/`month`/`all` 语义档位，供图表窗口与 KPI 共用 |
+| `kpis.py` | KPI 计算（默认最近一晚；周/月/全库档对睡眠取均值，步数取日均） |
+| `svg.py` | 睡眠分期图（run-length 压缩；未佩戴斜纹 / 无心率灰块 / 无记录留空） |
 | `render.py` | 读取 HTML 模板并注入数据 |
 | `cli.py` | `main`（`history_dashboard.py` 入口） |
-| `assets/` | `history_dashboard.html`、`history_dashboard.css`、`history_dashboard.js`、`history_charts.js`、`history_dashboard_tables.js` |
+| `assets/` | `history_dashboard.html`、`history_dashboard.css`、`history_dashboard.js`、`history_charts.js`、`history_coaxis.js`、`history_dashboard_tables.js` |
 
 ## 公开 API
 
 | 名称 | 说明 |
 |---|---|
-| `collect(db_path, *, days=7, spo2_sleep_path=None)` | 返回渲染所需的序列与元数据 |
+| `collect(db_path, *, days=7, spo2_sleep_path=None, range=None, kpi_range=None)` | 返回渲染所需的序列与元数据 |
 | `render(payload)` / `build(...)` | 生成完整 HTML 字符串 |
-| `hypnogram_svg(stages, height=44, lane_gap=1.0)` | 分期图 SVG |
-| `main(argv)` | CLI：`--db`、`-o/--output`、`--days`、`--spo2-sleep-jsonl` |
+| `hypnogram_svg(stages, height=44, lane_gap=1.0, nonwear=None, show_unknown=False)` | 分期图 SVG；可选底部未佩戴斜纹与无心率灰块 |
+| `main(argv)` | CLI：`--db`、`-o/--output`、`--days`、`--range`、`--kpi-range`、`--spo2-sleep-jsonl` |
+
+页面还会在库中存在 `activity_summary` 行时渲染**运动记录表**（类型/时长/步数/距离/消耗/心率）；
+Band 6 无 GPS，因此不画轨迹。
 
 ## 数据流
 
@@ -57,10 +62,15 @@ collect ──> kpis + svg ──> packaging ──> render(模板) ──> 单�
 |---|---|---|
 | `--db` | `data/mi_band.db` | 输入数据库 |
 | `-o/--output` | `dashboard_history.html` | 输出文件 |
-| `--days` | 7 | 展示时间窗口 |
+| `--days` | 7 | 展示时间窗口；未指定 `--range` 时生效 |
+| `--range` | 未指定 | `day`（1 天）/ `week`（7 天）/ `month`（30 天）/ `all`（全库）；决定窗口与同轴分桶宽度 |
+| `--kpi-range` | 跟随 `--range`，否则 `day` | KPI 聚合档位，可与图表窗口不同；更宽的档位会同时放宽取数窗口 |
 | `--spo2-sleep-jsonl` | 自动回退 | 表为空时读取取证 JSONL |
 
 KPI 标签与阶段颜色是输出契约的一部分，集中在 `strings.py` / `constants.py`。
+同轴视图把步数柱（左轴）、心率线（右轴）与睡眠/未佩戴色带叠在同一条时间轴上；
+`day` 用 10 分钟桶、`week` 用 1 小时桶、`month`/`all` 用自然日桶。
+没有手环记录的桶在三路里都留空，**不补零、不连线、不涂睡眠色**。
 
 ## 失败模式
 

@@ -42,25 +42,42 @@ cp .env.example .env
 
 ## 3. 获取 auth_key
 
-三选一：
+按可靠性排序（依据上游 [huami-token](https://codeberg.org/argrento/huami-token)
+项目实况核对，2026-11）：
 
-1. **小米账号**（交互式，密码不落盘）：
-
-   ```bash
-   .venv/bin/python get_auth_key.py     # 选择 1
-   ```
-
-2. **Zepp/Amazfit 账号**：
-
-   ```bash
-   .venv/bin/python get_auth_key.py     # 选择 2
-   ```
-
-3. **浏览器 app_token**（已有网页登录态）：
+1. **浏览器 app_token**（首选：不走密码登录，不受小米 2FA 影响）：
 
    ```bash
    .venv/bin/python fetch_by_token.py   # 输入 user_id 和 app_token
    ```
+
+   用手环绑定的账号登录 `https://watchface.zepp.com/`（或 `user.zepp.com`），
+   从会话 cookie 中取出 `user_id` + `app_token` 粘贴进来。这与 Gadgetbridge
+   [「电脑浏览器」教程](https://gadgetbridge.org/basics/pairing/huami-xiaomi-server/)
+   是同一套方法。
+
+2. **账号密码**（兜底路径，成功率不稳定）：
+
+   ```bash
+   .venv/bin/python get_auth_key.py     # 1 = 小米账号，2 = Zepp/Amazfit
+   ```
+
+   - **小米**选项自 2026-04 起大概率失败：小米对脚本登录强制 2FA/风控，
+     登录在返回会话密钥前即中断（"Missing ssecurity or location"，
+     [huami-token#119](https://codeberg.org/argrento/huami-token/issues/119)）。
+   - **Zepp/Amazfit**选项对绑在 Zepp 账号下的手环可用（2026-04 最后确认）；
+     Zepp 在 2025 年内改过两次登录流程，随时可能再失效。
+
+3. **Mi Fitness App 日志**（离线兜底，需拿到配对手机，无需 root）：
+
+   Mi Fitness App 会把密钥写进日志文件：
+
+   ```bash
+   grep -Eo '(authKey|encryptKey|huamiAuthKey)[":= ]+[[:xdigit:]]{32}' \
+     /sdcard/Android/data/com.xiaomi.wearable/files/log/*.log
+   ```
+
+   取文件中**最后一条**匹配（日志里可能出现多个密钥）。
 
 已有第三方 `huami-token` 输出时，直接填入 `.env` 亦可。
 `AUTH_KEY` 等价于手环配对凭据，请视同密码保管；详见 [privacy.md](privacy.zh-CN.md)。

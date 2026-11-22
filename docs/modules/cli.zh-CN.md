@@ -72,7 +72,8 @@ CLI 参数（完整说明见 [guides/configuration.md](../guides/configuration.z
 |---|---|
 | 未配置 DEVICE_ID/AUTH_KEY | 报错并退出码 1，提示配置 `.env` 或 `--demo` |
 | `--mtu` 越界 | 明确错误 + 合法区间，退出码 1 |
-| `--sync-sleep-spo2` 缺 `--sync-history` | argparse 拒绝，退出码 2 |
+| `--sync-sleep-spo2` / `--sync-sports` 缺 `--sync-history` | argparse 拒绝，退出码 2 |
+| `--sync-time` 与 `--sync-time-dry-run` 同时给 | argparse 互斥拒绝，退出码 2 |
 | 看板端口被占用 | 记录 error，继续无看板采集 |
 | 历史同步失败 | 只记录 error，实时采集继续 |
 | 会话异常 | 记录 `Monitoring stopped after error`，退出码 1；`--no-reconnect` 时不重连 |

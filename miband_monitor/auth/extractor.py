@@ -118,6 +118,10 @@ def run_extractor() -> int:
     print("Select login type:")
     print("  [1] Xiaomi Account (小米账号 / 手机号 / 邮箱 - 默认)")
     print("  [2] Amazfit / Zepp Account (华米官方邮箱账号)")
+    print(
+        "Note: since 2026-04 Xiaomi enforces 2FA on script logins, so option 1\n"
+        "often fails; prefer fetch_by_token.py (browser app_token route)."
+    )
     choice = input("Enter choice [1/2] (Default 1): ").strip()
     method = "amazfit" if choice == "2" else "xiaomi"
 
@@ -145,6 +149,18 @@ def run_extractor() -> int:
 
         if not found_key:
             print("\n[-] Could not find an Auth Key in the account's device records.")
+            print(
+                "[!] Devices paired through the Mi Fitness app keep their key on the\n"
+                "    Xiaomi backend and may not appear in this account's records."
+            )
+            print(
+                "[*] Recommended next steps:\n"
+                "    1. fetch_by_token.py — browser user_id + app_token route,\n"
+                "       unaffected by Xiaomi 2FA (see docs/guides/configuration.md §3);\n"
+                "    2. Read the key from the Mi Fitness app logs on your phone\n"
+                "       (no root needed): Android/data/com.xiaomi.wearable/files/log/*.log\n"
+                "       — search for 'authKey' / 'encryptKey'."
+            )
             return 1
 
         print("\n" + "=" * 60)
@@ -162,6 +178,17 @@ def run_extractor() -> int:
 
     except HuamiTokenError as exc:
         print(f"\n[-] Authentication error: {exc}", file=sys.stderr)
+        if method == "xiaomi":
+            print(
+                "[-] Since 2026-04 Xiaomi usually enforces 2FA on script logins, which\n"
+                "    this flow cannot complete ('Missing ssecurity or location').",
+                file=sys.stderr,
+            )
+            print(
+                "[*] Use fetch_by_token.py (browser app_token route) instead, or read\n"
+                "    the key from the Mi Fitness app logs (see configuration guide §3).",
+                file=sys.stderr,
+            )
         return 1
     except Exception as exc:
         print(f"\n[-] Unexpected error: {exc}", file=sys.stderr)

@@ -9,6 +9,7 @@ and an explicit allowlist of documentation placeholders/test vectors.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -59,6 +60,76 @@ def git_files() -> list[str]:
     except (OSError, subprocess.CalledProcessError):
         return []
     return [item for item in out.decode("utf-8", "replace").split("\x00") if item]
+
+
+#: Windows principals that would let other local users read the .env file.
+#: Name forms match icacls output on English systems; SID forms cover listings
+#: that render well-known accounts as SIDs instead of localized names.
+_WINDOWS_OTHER_USER_PRINCIPALS = (
+    "BUILTIN\\Users",                     # S-1-5-32-545
+    "NT AUTHORITY\\Authenticated Users",  # S-1-5-11
+    "Everyone",                           # S-1-1-0
+    "S-1-5-32-545",
+    "S-1-5-11",
+    "S-1-1-0",
+)
+
+#: Windows equivalent of "chmod 600 .env": drop inherited ACEs, keep the user.
+#: The account name is resolved at runtime so the printed command can be pasted
+#: directly into cmd or PowerShell (the "%USERNAME%" spelling only expands in cmd).
+def _windows_env_fix_command(env_file: Path) -> str:
+    user = os.environ.get("USERNAME") or "%USERNAME%"
+    return f'icacls {env_file.name} /inheritance:r /grant:r "{user}:F"'
+
+
+def _windows_env_offenders(icacls_output: str) -> list[str]:
+    """Return other-user principals that hold access in an icacls listing.
+
+    Allow ACEs are matched line by line; deny ACEs restrict instead of grant
+    access and are skipped. On installs where icacls localizes well-known
+    account names, the listing matches nothing and the check silently passes
+    instead of producing a false warning.
+    """
+    offenders: list[str] = []
+    for line in icacls_output.splitlines():
+        if "(DENY)" in line:
+            continue
+        for principal in _WINDOWS_OTHER_USER_PRINCIPALS:
+            if principal in line and principal not in offenders:
+                offenders.append(principal)
+    return offenders
+
+
+def _env_permission_warning(env_file: Path) -> str | None:
+    """Warn when the local .env is readable by other users (platform aware).
+
+    On Windows os.stat permission bits are always 0666 for writable files, so
+    the real NTFS ACL is inspected via icacls instead; when the ACL cannot be
+    read the check stays silent rather than producing a false warning.
+    """
+    if not env_file.is_file():
+        return None
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                ["icacls", str(env_file)], capture_output=True, timeout=10
+            )
+        except (OSError, subprocess.TimeoutExpired):  # pragma: no cover - defensive
+            return None
+        output = result.stdout.decode("utf-8", "replace")
+        offenders = _windows_env_offenders(output)
+        if offenders:
+            return (
+                "WARN: local .env is readable by other local users "
+                f"({', '.join(offenders)}); run: {_windows_env_fix_command(env_file)}"
+            )
+        return None
+    try:
+        if env_file.stat().st_mode & 0o077:
+            return "WARN: local .env is readable by group/others; run: chmod 600 .env"
+    except OSError:  # pragma: no cover - exotic filesystems
+        pass
+    return None
 
 
 def scan_file(rel_path: str) -> list[tuple[int, str, str]]:
@@ -112,9 +183,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{violations} privacy finding(s); redact or move them out of the repository")
         return 1
 
-    env_file = ROOT / ".env"
-    if env_file.is_file() and env_file.stat().st_mode & 0o077:
-        print("WARN: local .env is readable by group/others; run: chmod 600 .env")
+    warning = _env_permission_warning(ROOT / ".env")
+    if warning:
+        print(warning)
     print("OK: no real MAC/auth key/token/home path detected in tracked files")
     return 0
 

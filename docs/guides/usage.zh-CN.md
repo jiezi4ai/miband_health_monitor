@@ -80,6 +80,14 @@
 
 # 额外抓取 0x26 整夜血氧（写入独立 spo2_sleep 表 + JSONL）
 .venv/bin/python miband_client.py 60 --sync-history 7 --sync-sleep-spo2
+
+# 额外抓取 0x05 运动总结（每轮一条，写入 activity_summary 表 + JSONL）
+# 注意：成功回 ACK 后，手环侧对应总结会被清掉（与 GB 行为一致）
+.venv/bin/python miband_client.py 60 --sync-history 7 --sync-sports
+
+# 下行校时：先 dry-run 读漂移（不写），确认后再写入
+.venv/bin/python miband_client.py 5 --sync-time-dry-run --storage none
+.venv/bin/python miband_client.py 5 --sync-time --storage none
 ```
 
 协议要点（依据 Gadgetbridge 公开逆向结果独立实现）：
@@ -90,7 +98,11 @@
 - 分片带递增计数（每次拉取**不重置**），完成后回 `10 02 01`，客户端回 `[0x03]` 确认；
 - 血氧记录：版本 2 + 每条 65 字节（int32 LE 时间、1 字节 SpO₂、60 字节保留），
   负值表示自动测量（真实值 = 原始值 + 128）；
-- 活动记录：每分钟 8 字节 `kind,intensity,steps,heart_rate,unknown1,sleep,deep_sleep,rem_sleep`。
+- 活动记录：每分钟 8 字节 `kind,intensity,steps,heart_rate,unknown1,sleep,deep_sleep,rem_sleep`；
+- 运动总结 `0x05`：每次 fetch 返回一条，v519 布局（版本号、运动类型、起止时间、步数/卡路里/距离/心率等）；
+  手环无 GPS，`has_gps` 为假，不抓轨迹。成功 ACK 后手环侧该条会被清掉。
+- 校时走标准 CTS `0x2A2B` 的 Mi Band 11 字节变体（年 LE16/月/日/时/分/秒/星期/0/0/时区刻钟）；
+  写入失败只告警，不中断会话。
 
 ### 真机暴露的两个协议陷阱
 
@@ -209,23 +221,41 @@ Zepp 按同区间折算约 480/460/20/44（8%）。反推出的三条规则就�
 第二步是硬前提：手环收到 `03` ack 后会清掉已上传的分钟。可用夜少于两夜时
 `tools/calibrate_sleep.py` 会拒绝拟合，只列差值。
 
+节奏上限来自硬件：手环分钟数据是一块 **2400 分钟（40 小时）滑动窗口**，隔一天再同步，
+前一晚已经在窗口之外（[investigations/sleep-fields.md](../investigations/sleep-fields.zh-CN.md) §10）。
+记 Zepp 数字时**务必带上 `device` 字段**：手环未佩戴的夜晚 Zepp 照样显示完整分期
+（那是同账号其它设备的数据），`calibrate_sleep.py` 会对无 `device` 的夜给出
+"来源未记录"警告，并把未佩戴夜直接排除出校准集。
+
+**日期要减一天。** Zepp 睡眠页的日期是**醒来那天**（最新一条就是今天日期下的"昨晚睡眠"），
+而本项目按入睡日归档，所以页面写 11-20 的夜，JSON 里要填 `"date": "2026-11-19"`、
+`window` 也只写入睡那天的钟点（`["22:28", "07:04"]`，跨午夜由工具自动处理）。
+2026-11-20 用 7 夜真机数据验证过这条映射，5 夜结束时刻与手环差 ≤1 分钟；
+填反了不会报错，只会把每晚都错配成隔壁夜。
+
 ## 6. 离线历史看板（单文件 HTML）
 
 ```bash
 .venv/bin/python history_dashboard.py --db data/mi_band.db \
     -o dashboard_history.html --days 7
 
+# 语义档位：一日 / 一周 / 一月 / 全库；KPI 口径可单独指定
+.venv/bin/python history_dashboard.py --db data/mi_band.db \
+    -o dashboard_week.html --range week --kpi-range week
+
 # 只有 JSONL、还没导入数据库时，可显式指定整夜血氧来源
 .venv/bin/python history_dashboard.py --db data/mi_band.db \
     -o dashboard_history.html --spo2-sleep-jsonl validation/payloads-26/spo2_sleep.jsonl
 ```
 
-内容：KPI（最近一晚、深睡占比、睡眠效率、步数、心率区间、血氧最低）、睡眠结构 SVG、
-心率曲线、按天活动节律、每日步数、整夜睡眠血氧曲线、点测血氧表。无 CDN/字体/图片，
-可直接双击打开、发邮件或存档。
+内容：KPI（默认最近一晚；`--range week|month|all` 改为平均睡眠与日均步数）、睡眠结构 SVG、
+心率曲线、按天活动节律、**同轴视图**（步数柱 + 心率线 + 睡眠/未佩戴色带）、每日步数、
+整夜睡眠血氧曲线、点测血氧表。无 CDN/字体/图片，可直接双击打开、发邮件或存档。
 
-三个刻意设计：活动节律条按真实时间戳定位（手环历史不是连续网格）；心率缺失夜晚画
-卧床灰带而不是空泳道；整夜血氧（0x26）与点测血氧（0x25）分成两节、超过 5 分钟空档断线。
+四个刻意设计：活动节律条按真实时间戳定位（手环历史不是连续网格）；心率缺失夜晚画
+卧床灰带而不是空泳道；整夜血氧（0x26）与点测血氧（0x25）分成两节、超过 5 分钟空档断线；
+色带把**未佩戴（斜纹）/有记录但无心率（灰块）/没有记录（留空）**画成三种不同状态，
+同轴视图里没有记录的桶不补零、不连线。
 
 ## 7. CSV 导出
 

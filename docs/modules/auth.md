@@ -6,10 +6,10 @@
 
 Wrap "how to obtain `AUTH_KEY`" into two interactive flows and write it back safely to the local `.env`:
 
-- `get_auth_key.py`: sign in with a Xiaomi account or a Zepp/Amazfit account → list bound devices → retrieve the key;
-- `fetch_by_token.py`: when a browser login session already exists, look up devices directly with `user_id` + `app_token`.
+- `fetch_by_token.py` (**primary path**): with an existing browser web login session, look up devices directly with `user_id` + `app_token` — no password login, unaffected by Xiaomi 2FA;
+- `get_auth_key.py` (**fallback path**, hit-or-miss): sign in with a Xiaomi account or a Zepp/Amazfit account → list bound devices → retrieve the key. The Xiaomi path has been blocked by Xiaomi's 2FA/risk control on script logins since 2026-04 ([huami-token#119](https://codeberg.org/argrento/huami-token/issues/119)); the Zepp path last worked in 2026-04 but Zepp changed its login flow twice in 2025.
 
-The cloud protocol implementation lives in the third-party [huami_token/](../../huami_token/) (MIT); this package only contains the interactive flows, endpoint constants and secure file-writing logic.
+The cloud protocol implementation lives in the third-party [huami_token/](../../huami_token/) (MIT; vendored at upstream v0.8.0 — provenance and sync steps in [huami_token/VENDORED.md](../../huami_token/VENDORED.md)); this package only contains the interactive flows, endpoint constants and secure file-writing logic.
 
 Source: [miband_monitor/auth/](../../miband_monitor/auth/)
 
@@ -54,6 +54,8 @@ The terminal only prints the masked device address/key status
 | Situation | Behavior |
 |---|---|
 | Wrong account/password or CAPTCHA required | Prints the server error, returns non-zero, does not write `.env` |
+| Xiaomi 2FA triggered (since 2026-04) | Xiaomi method aborts with "Missing ssecurity or location"; the error hint recommends `fetch_by_token.py` and the Mi Fitness app-log fallback ([configuration.md §3](../guides/configuration.md)) |
+| Key not present in this account's records (Mi Fitness–bound device) | Explicit notice plus fallback hints (browser token route / Mi Fitness app logs); does not write the key |
 | No device under the account | Explicit notice, does not write the key |
 | `app_token` expired | Prompts to obtain a new one from the browser |
 | Network unreachable | Catches request exceptions and gives endpoint/network hints |

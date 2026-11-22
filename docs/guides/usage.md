@@ -80,6 +80,14 @@ The Mi Band 6's SpO2 is not a real-time notification but a history record; activ
 
 # Also fetch 0x26 overnight SpO2 (writes the separate spo2_sleep table + JSONL)
 .venv/bin/python miband_client.py 60 --sync-history 7 --sync-sleep-spo2
+
+# Also fetch 0x05 workout summaries (one per round -> activity_summary table + JSONL).
+# A successful ACK clears that summary on the band, matching Gadgetbridge.
+.venv/bin/python miband_client.py 60 --sync-history 7 --sync-sports
+
+# Downlink clock sync: dry-run first to read the drift, then write
+.venv/bin/python miband_client.py 5 --sync-time-dry-run --storage none
+.venv/bin/python miband_client.py 5 --sync-time --storage none
 ```
 
 Protocol highlights (independently implemented based on Gadgetbridge's public reverse-engineering results):
@@ -90,7 +98,11 @@ Protocol highlights (independently implemented based on Gadgetbridge's public re
 - chunks carry an incrementing counter (**not reset** per fetch); when done the band replies `10 02 01` and the client replies `[0x03]` to acknowledge;
 - SpO2 records: version 2 + 65 bytes each (int32 LE time, 1-byte SpO₂, 60 bytes reserved),
   a negative value means automatic measurement (real value = raw value + 128);
-- activity records: 8 bytes per minute `kind,intensity,steps,heart_rate,unknown1,sleep,deep_sleep,rem_sleep`.
+- activity records: 8 bytes per minute `kind,intensity,steps,heart_rate,unknown1,sleep,deep_sleep,rem_sleep`;
+- workout summaries `0x05`: one per fetch, v519 layout (version, activity kind, start/end, steps/calories/distance/HR).
+  The band has no GPS, so `has_gps` is false and no track is fetched; a successful ACK clears the summary on the band;
+- clock sync uses the Mi Band 11-byte variant of the standard CTS `0x2A2B` record
+  (year LE16/month/day/hour/minute/second/dow/0/0/UTC-offset quarters); a failed write only warns.
 
 ### Two protocol pitfalls exposed by the real device
 
@@ -210,24 +222,42 @@ Adding samples takes only three steps: **wear it to sleep → sync the same day 
 The second step is a hard prerequisite: after receiving the `03` ack, the band clears the minutes already uploaded. When there are fewer than
 two usable nights, `tools/calibrate_sleep.py` refuses to fit and only lists the differences.
 
+The cadence ceiling comes from the hardware: the band's minute data is a **2400-minute (40-hour) sliding window**, so waiting a
+day too long puts the previous night outside it ([investigations/sleep-fields.md](../investigations/sleep-fields.md) §10).
+When recording the Zepp numbers, **always include the `device` field**: on nights when the band was not worn, Zepp still shows
+a complete staging (produced by another device on the same account). `calibrate_sleep.py` flags nights without a `device`
+field as "source not recorded" and excludes non-wear nights from the calibration set outright.
+
+**Subtract one day from the page date.** A Zepp sleep page is dated by the **morning you woke up** (the newest entry is
+"last night's sleep" under today's date), while this project keys a night by the evening it started. A page dated 11-20
+therefore goes in as `"date": "2026-11-19"`, with `window` holding the clock times of that evening
+(`["22:28", "07:04"]`; crossing midnight is handled for you). Verified on 2026-11-20 against seven hardware nights --
+five of them end within one minute of the band's own session. Getting it backwards does not raise an error; it silently
+pairs every night with its neighbour.
+
 ## 6. Offline history dashboard (single-file HTML)
 
 ```bash
 .venv/bin/python history_dashboard.py --db data/mi_band.db \
     -o dashboard_history.html --days 7
 
+# Semantic ranges: day / week / month / all; KPI aggregation can be set separately
+.venv/bin/python history_dashboard.py --db data/mi_band.db \
+    -o dashboard_week.html --range week --kpi-range week
+
 # When you only have JSONL and it has not been imported into the database, you can specify the overnight SpO2 source explicitly
 .venv/bin/python history_dashboard.py --db data/mi_band.db \
     -o dashboard_history.html --spo2-sleep-jsonl validation/payloads-26/spo2_sleep.jsonl
 ```
 
-Contents: KPIs (latest night, deep-sleep share, sleep efficiency, steps, heart-rate range, lowest SpO2), sleep-structure SVG,
-heart-rate curve, per-day activity rhythm, daily steps, overnight sleep SpO2 curve, spot-check SpO2 table. No CDN/fonts/images,
-so it can be opened by double-clicking, emailed or archived directly.
+Contents: KPIs (latest night by default; averaged sleep and daily steps at `--range week|month|all`), sleep-structure SVG,
+heart-rate curve, per-day activity rhythm, **co-axis view** (step bars + heart-rate line + sleep/nonwear band), daily steps,
+overnight sleep SpO2 curve, spot-check SpO2 table. No CDN/fonts/images, so it can be opened by double-clicking, emailed or archived directly.
 
-Three deliberate design choices: the activity rhythm bars are positioned by real timestamps (band history is not a continuous grid);
+Four deliberate design choices: the activity rhythm bars are positioned by real timestamps (band history is not a continuous grid);
 nights with missing heart rate draw a grey time-in-bed band instead of an empty lane; overnight SpO2 (0x26) and spot-check SpO2 (0x25)
-are split into two sections, with lines broken across gaps longer than 5 minutes.
+are split into two sections, with lines broken across gaps longer than 5 minutes; the band distinguishes **nonwear (hatch) /
+recorded-but-no-HR (grey) / no record (blank)**, and co-axis buckets with no record are neither zero-filled nor joined by a line.
 
 ## 7. CSV export
 

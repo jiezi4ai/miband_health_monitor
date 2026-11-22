@@ -60,7 +60,8 @@ main()
 
 CLI arguments (full description in [guides/configuration.md](../guides/configuration.md)):
 `duration`, `--imu`, `--device-id`, `--device-name`, `--mtu`, `--sync-history [DAYS]`,
-`--sync-sleep-spo2`, `--demo`, `--output`, `--storage`, `--export-csv`,
+`--sync-sleep-spo2`, `--sync-sports`, `--sync-time` / `--sync-time-dry-run`, `--demo`,
+`--output`, `--storage`, `--export-csv`,
 `--scan-timeout`, `--connect-timeout`, `--log-level`, `--web-port`, `--web-host`,
 `--no-reconnect`, `--doctor`, `--no-direct-connect`.
 Reconnect policy: disconnect after successful authentication → 0.3 s fast reconnect (to catch the band's
@@ -72,7 +73,8 @@ advertising window after a disconnect); repeated failures → exponential backof
 |---|---|
 | DEVICE_ID/AUTH_KEY not configured | Error and exit code 1, hint to configure `.env` or use `--demo` |
 | `--mtu` out of range | Explicit error + valid range, exit code 1 |
-| `--sync-sleep-spo2` without `--sync-history` | Rejected by argparse, exit code 2 |
+| `--sync-sleep-spo2` / `--sync-sports` without `--sync-history` | Rejected by argparse, exit code 2 |
+| `--sync-time` together with `--sync-time-dry-run` | Rejected as mutually exclusive, exit code 2 |
 | Dashboard port in use | Logs an error, continues collecting without the dashboard |
 | History sync fails | Logs an error only, real-time collection continues |
 | Session exception | Logs `Monitoring stopped after error`, exit code 1; no reconnect with `--no-reconnect` |

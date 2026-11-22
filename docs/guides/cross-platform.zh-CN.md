@@ -208,7 +208,7 @@ py -3 -m venv .venv
 .venv\Scripts\python.exe miband_client.py --demo 2 --imu --output data\demo --export-csv
 ```
 
-预期：全部通过（当前 `241 passed, 4 skipped`，跳过项需要真实抓包数据）；
+预期：全部通过（当前 390+ tests，跳过项需要真实抓包数据）；
 demo 生成 `data\demo\*.jsonl`、`mi_band.db` 与 `csv\`。
 这两步通过说明 Python、依赖、ECDH 纯 Python 后端、存储、看板、导出链路在
 Windows 上都正常，剩下的只有真实 BLE 链路。

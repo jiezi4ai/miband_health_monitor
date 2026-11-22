@@ -138,7 +138,7 @@ refactor:
 |---|---|---|---|
 | tiny-ECDH (C) | `ecdh.c` / `ecdh.h` | upstream tiny-ECDH-c | Byte-for-byte wire-format dependency; any change breaks compatibility with the band; the compiled artifact `libecdh.so` is a Linux x86-64 prebuild |
 | tiny-ECDH-python | [vendor/tiny_ecdh/](../vendor/tiny_ecdh/) | MIT © 2023 Daniel Oliveira | Pure-Python fallback for platforms without the native library (Windows/macOS/ARM/CI), which must match upstream |
-| huami-token | [huami_token/](../huami_token/) | MIT © 2025 Kirill Snezhko | Huami/Zepp cloud API client used to obtain auth_key; read-only use |
+| huami-token | [huami_token/](../huami_token/) | MIT © 2020–2025 Kirill Snezhko ([LICENSE](../huami_token/LICENSE.md)) | Huami/Zepp cloud API client used to obtain auth_key; read-only use; vendored unmodified at upstream v0.8.0 — provenance and sync steps in [huami_token/VENDORED.md](../huami_token/VENDORED.md) |
 | Prebuilt library | `libecdh.so` | compiled from the C sources above | Binary artifact, not reviewed by line count; automatically compiled or falls back to pure Python when the library is absent |
 
 **A protocol reference is not code copying**: the chunked-ECDH and history-fetch flows reference

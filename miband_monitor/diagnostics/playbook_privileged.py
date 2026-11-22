@@ -150,7 +150,10 @@ async def run_disable_usb_autosuspend() -> PlaybookResult:
         )
 
     control_file = Path(usb_power["power_dir"]) / "control"
-    manual_cmd = f"echo on | sudo tee {control_file}"
+    # The manual command is a copyable Linux shell snippet: build it from the
+    # reported sysfs string so a Windows/macOS GUI host still renders forward
+    # slashes instead of a pathlib-converted local separator.
+    manual_cmd = f"echo on | sudo tee {usb_power['power_dir']}/control"
     hint = format_usb_autosuspend_hint(usb_power)
     prefix = await _privileged_prefix()
     if prefix is None:

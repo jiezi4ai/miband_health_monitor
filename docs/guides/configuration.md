@@ -42,25 +42,43 @@ cp .env.example .env
 
 ## 3. Obtain auth_key
 
-Choose one of three:
+Paths ordered by reliability (status checked against the upstream
+[huami-token](https://codeberg.org/argrento/huami-token) project, 2026-11):
 
-1. **Xiaomi account** (interactive, password is never written to disk):
-
-   ```bash
-   .venv/bin/python get_auth_key.py     # choose 1
-   ```
-
-2. **Zepp/Amazfit account**:
-
-   ```bash
-   .venv/bin/python get_auth_key.py     # choose 2
-   ```
-
-3. **Browser app_token** (existing web login session):
+1. **Browser app_token** (preferred: no password login, unaffected by Xiaomi 2FA):
 
    ```bash
    .venv/bin/python fetch_by_token.py   # enter user_id and app_token
    ```
+
+   Log into `https://watchface.zepp.com/` (or `user.zepp.com`) with the account
+   your band is bound to, take `user_id` + `app_token` from the session cookies,
+   and paste them here. This is the same recipe as Gadgetbridge's
+   ["on a computer" method](https://gadgetbridge.org/basics/pairing/huami-xiaomi-server/).
+
+2. **Account password** (fallback, hit-or-miss):
+
+   ```bash
+   .venv/bin/python get_auth_key.py     # 1 = Xiaomi account, 2 = Zepp/Amazfit
+   ```
+
+   - The **Xiaomi** option has been failing since 2026-04: Xiaomi enforces
+     2FA/risk control on script logins, so the login dies with
+     "Missing ssecurity or location" ([huami-token#119](https://codeberg.org/argrento/huami-token/issues/119)).
+   - The **Zepp/Amazfit** option works for bands bound to a Zepp account
+     (last confirmed 2026-04); Zepp changed its login flow twice in 2025, so it
+     may break again at any time.
+
+3. **Mi Fitness app logs** (offline fallback, needs the paired phone, no root):
+
+   The Mi Fitness app writes the key to its log files:
+
+   ```bash
+   grep -Eo '(authKey|encryptKey|huamiAuthKey)[":= ]+[[:xdigit:]]{32}' \
+     /sdcard/Android/data/com.xiaomi.wearable/files/log/*.log
+   ```
+
+   Use the last match in the file; multiple keys may appear.
 
 If you already have output from the third-party `huami-token`, you can fill it into `.env` directly.
 `AUTH_KEY` is equivalent to the band's pairing credential; treat it like a password; see [privacy.md](privacy.md) for details.

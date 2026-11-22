@@ -17,7 +17,8 @@ data/
 ├── spo2.jsonl              # --sync-history 产生
 ├── activity_history.jsonl  # --sync-history 产生
 ├── spo2_sleep.jsonl        # --sync-sleep-spo2 产生（同时写 spo2_sleep 表）
-├── mi_band.db              # 含独立 spo2_sleep 表
+├── activity_summary.jsonl  # --sync-history --sync-sports 产生（运动总结）
+├── mi_band.db              # 含独立 spo2_sleep / activity_summary 表
 ├── mi_band.db-wal / mi_band.db-shm
 └── csv/                    # --export-csv 生成
     ├── heart_rate.csv
@@ -25,7 +26,8 @@ data/
     ├── imu.csv
     ├── spo2.csv
     ├── activity_history.csv
-    └── spo2_sleep.csv
+    ├── spo2_sleep.csv
+    └── activity_summary.csv
 ```
 
 ## 2. 时间语义
@@ -58,6 +60,7 @@ data/
 | `spo2.jsonl` | `spo2`（%）、`auto_measure`（0/1） |
 | `activity_history.jsonl` | `kind`、`intensity`、`steps`、`heart_rate`、`unknown1`、`sleep`、`deep_sleep`、`rem_sleep`（每分钟一行） |
 | `spo2_sleep.jsonl` | `spo2`（无符号）、`duration`、`spo2_high/low`、`signal_quality`、`extend`（原始字节组）、`source` |
+| `activity_summary.jsonl` | `end_ts`、`duration_s`、`kind_code/kind_name`、`steps`、`active_seconds`、`calories`、`distance_m`、`average/max/min_hr`、`average_pace_s_km`、`version`、`has_gps`（一次运动一行） |
 
 示例：
 
@@ -80,6 +83,7 @@ IMU 换算：int16 / 4096 LSB/g；`a*_ms2 = a*_g * 9.80665`。
 | `spo2` | `id, ts, iso_time, spo2, auto_measure` |
 | `activity_history` | `id, ts, iso_time, kind, intensity, steps, heart_rate, unknown1, sleep, deep_sleep, rem_sleep` |
 | `spo2_sleep` | `id, ts, iso_time, spo2, duration, spo2_high, spo2_low, signal_quality, extend` |
+| `activity_summary` | `id, ts, iso_time, end_ts, duration_s, kind_code, kind_name, steps, active_seconds, calories, distance_m, average_hr, max_hr, min_hr, average_pace_s_km, version, has_gps` |
 
 常用查询：
 
@@ -90,9 +94,14 @@ SELECT sensor_type, sequence, sample_index, az_g FROM imu WHERE ts > :since;
 SELECT datetime(ts, 'unixepoch'), spo2, auto_measure FROM spo2 ORDER BY ts;
 SELECT datetime(ts, 'unixepoch'), steps, heart_rate FROM activity_history ORDER BY ts;
 SELECT datetime(ts, 'unixepoch'), spo2, duration FROM spo2_sleep ORDER BY ts;
+SELECT datetime(ts, 'unixepoch'), kind_name, steps, distance_m FROM activity_summary ORDER BY ts;
 ```
 
 `spo2_sleep` 是**独立表**，不与点测 `spo2` 混用；四组未解明语义的字节以 JSON 文本存放。
+
+点测 `spo2` 表为空**属预期**：点测记录只由手环侧的手动/自动单次测量产生，
+手环上没有点测记录时同步轮次就"声明 0 条"（INFO 日志可见），不是链路故障；
+想要整夜连续血氧请用 `--sync-sleep-spo2`（写入 `spo2_sleep` 表）。
 
 ## 5. CSV
 

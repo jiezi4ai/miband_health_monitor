@@ -208,7 +208,7 @@ so no manual handling is needed, and neither Visual Studio nor gcc is required.
 .venv\Scripts\python.exe miband_client.py --demo 2 --imu --output data\demo --export-csv
 ```
 
-Expected: all pass (currently `241 passed, 4 skipped`; the skipped cases need real capture data);
+Expected: all pass (currently 390+ tests; the skipped cases need real capture data);
 the demo produces `data\demo\*.jsonl`, `mi_band.db` and `csv\`.
 If these two steps pass, Python, dependencies, the pure-Python ECDH backend, storage, the dashboard and the export path are all working on
 Windows, leaving only the real BLE link.

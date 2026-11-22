@@ -53,7 +53,6 @@ mi_band.db*
 # `docs/validation/` is the tracked documentation folder, so only ignore
 # capture bundles named `validation/` elsewhere in the tree.
 validation/
-!docs/validation/
 payloads/
 captures/
 screenshots/
@@ -117,3 +116,21 @@ desktop.ini
 
 # WorkBuddy local session memory (never commit)
 .workbuddy/
+
+# --- Local reference clones & investigation scratch (never commit) ----------
+# Upstream huami-token clone kept for future syncs (contains its own .git;
+# committing it would create an embedded repo / gitlink). Provenance of the
+# vendored copy is recorded in huami_token/VENDORED.md instead.
+huami_token_upstream/
+scratch/
+
+# Local work notes with real device addresses / personal paths. The durable,
+# redacted evidence lives in docs/validation/ instead (see improvement plan R-3).
+temp/
+docs/investigations
+docs/validation/
+
+# Generated offline dashboards at the repo root (default output of
+# history_dashboard.py without -o). Regenerate into data/ instead, which is
+# already ignored and excluded from the line budget.
+/history_dashboard.html

@@ -19,8 +19,9 @@ Source: [miband_monitor/history/](../../miband_monitor/history/)
 | `protocol.py` | UUIDs, command/response bytes, record sizes, `FetchDataType`, short calendar and fetch time codecs, log formatting |
 | `models.py` | `HistoryFetchError`, `HistoryParseError`, `HistorySyncResult` |
 | `parsers.py` | `parse_spo2_normal`, `parse_spo2_sleep`, `parse_activity`, `_trim_to_records`, `_parse_payload` |
+| `summary_parser.py` | `parse_sports_summary` (0x05 workout summaries, v512+ layout; v519 hardware-fixture regression) |
 | `fetcher.py` | `BandHistoryFetcher`: one fetch round, GATT subscription, chunk reassembly, completion frame/ACK |
-| `sync.py` | `sync_history`, `summarize_history_result`, `_extend_*` |
+| `sync.py` | `sync_history`, `summarize_history_result`, `_extend_*`; 0x05 fetches one summary per round and advances by start+1s |
 
 ## Public API
 
@@ -33,7 +34,7 @@ Source: [miband_monitor/history/](../../miband_monitor/history/)
 | `parse_spo2_normal(payload)` | version 2 + N×65B; negative value = automatic measurement, real value +128 |
 | `parse_spo2_sleep(payload)` | version 2 + N×30B; includes duration/high/low/signal/extend |
 | `BandHistoryFetcher` | `fetch(start, data_type, ...)` returns the raw payload |
-| `sync_history(client, days, on_spo2, on_activity, include_spo2_sleep=False, on_spo2_sleep=None)` | High-level loop, returns `HistorySyncResult` |
+| `sync_history(client, days, on_spo2, on_activity, include_spo2_sleep=False, on_spo2_sleep=None, include_sports=False, on_sports=None)` | High-level loop, returns `HistorySyncResult` (including `sports`) |
 | `summarize_history_result(result)` | One-line summary (sample count, rounds, errors) |
 
 ## Data flow

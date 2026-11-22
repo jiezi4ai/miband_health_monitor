@@ -127,7 +127,7 @@ data/mi_band.db ──> reports.history      → 文本 / JSON 汇总
 |---|---|---|---|
 | tiny-ECDH（C） | `ecdh.c` / `ecdh.h` | 上游 tiny-ECDH-c | 逐字节线格式依赖，改动会破坏与手环的兼容；编译产物 `libecdh.so` 为 Linux x86-64 预编译 |
 | tiny-ECDH-python | [vendor/tiny_ecdh/](../vendor/tiny_ecdh/) | MIT © 2023 Daniel Oliveira | 无原生库平台（Windows/macOS/ARM/CI）的纯 Python 回退，必须与上游一致 |
-| huami-token | [huami_token/](../huami_token/) | MIT © 2025 Kirill Snezhko | 华米/Zepp 云 API 客户端，用于获取 auth_key；只读使用 |
+| huami-token | [huami_token/](../huami_token/) | MIT © 2020–2025 Kirill Snezhko（[LICENSE](../huami_token/LICENSE.md)） | 华米/Zepp 云 API 客户端，用于获取 auth_key；只读使用；以上游 v0.8.0 原样 vendoring——溯源与同步步骤见 [huami_token/VENDORED.md](../huami_token/VENDORED.md) |
 | 预编译库 | `libecdh.so` | 由上述 C 源码编译 | 二进制产物，不按行数审查；无库时自动编译或回退纯 Python |
 
 **协议参考不等于代码复制**：Chunked ECDH 与历史 fetch 的流程参考 Gadgetbridge

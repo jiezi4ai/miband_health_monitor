@@ -19,8 +19,9 @@
 | `protocol.py` | UUID、命令/响应字节、记录尺寸、`FetchDataType`、短日历与 fetch 时间编解码、日志格式化 |
 | `models.py` | `HistoryFetchError`、`HistoryParseError`、`HistorySyncResult` |
 | `parsers.py` | `parse_spo2_normal`、`parse_spo2_sleep`、`parse_activity`、`_trim_to_records`、`_parse_payload` |
+| `summary_parser.py` | `parse_sports_summary`（0x05 运动总结，v512+ 布局；v519 真机夹具回归） |
 | `fetcher.py` | `BandHistoryFetcher`：一次 fetch 轮次、GATT 订阅、分片组装、完成帧/ACK |
-| `sync.py` | `sync_history`、`summarize_history_result`、`_extend_*` |
+| `sync.py` | `sync_history`、`summarize_history_result`、`_extend_*`；0x05 每轮抓一条并按 start+1s 推进游标 |
 
 ## 公开 API
 
@@ -33,7 +34,7 @@
 | `parse_spo2_normal(payload)` | 版本 2 + N×65B；负值 = 自动测量，真实值 +128 |
 | `parse_spo2_sleep(payload)` | 版本 2 + N×30B；含 duration/high/low/signal/extend |
 | `BandHistoryFetcher` | `fetch(start, data_type, ...)` 返回原始 payload |
-| `sync_history(client, days, on_spo2, on_activity, include_spo2_sleep=False, on_spo2_sleep=None)` | 高层循环，返回 `HistorySyncResult` |
+| `sync_history(client, days, on_spo2, on_activity, include_spo2_sleep=False, on_spo2_sleep=None, include_sports=False, on_sports=None)` | 高层循环，返回 `HistorySyncResult`（含 `sports`） |
 | `summarize_history_result(result)` | 一行摘要（样本数、rounds、errors） |
 
 ## 数据流

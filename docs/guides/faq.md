@@ -52,6 +52,7 @@ Look up by symptom; see [cross-platform.md](cross-platform.md) for platform deta
 | Zepp has data, but the band returns none | Three reasons: (1) already consumed by the app (permanent holes or out-of-window outside 40 hours); (2) the band never produces this kind of data (deep sleep/REM/score are computed by the app); (3) the band was not worn that night (`0xF3`), and the app showed another device on the same account. See [investigations/sleep-fields.md](../investigations/sleep-fields.md). |
 | Want to confirm how far back the band still has data | `python tools/probe_declared.py 168 24`: query only, no fetch, no ACK, does not disturb the buffer. |
 | 0x26 sleep SpO2 imported but not visible | Confirm it was written to the separate `spo2_sleep` table; the offline dashboard prefers the table and falls back to JSONL when it is empty. |
+| The spot-check `spo2` table stays empty | Expected: spot-check records only exist when a single measurement was taken on the band; otherwise the round "declares 0 records" (visible in the INFO log). For an overnight curve use `--sync-sleep-spo2` (separate `spo2_sleep` table). |
 
 ## Dashboard and reports
 

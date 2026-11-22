@@ -39,10 +39,11 @@ Steps in [.github/workflows/ci.yml](../../.github/workflows/ci.yml):
 3. `tools/check_file_sizes.py`: first-party code/assets ≤300 lines;
 4. `tools/check_privacy.py`: git-tracked files must not contain real MACs/keys/paths;
 5. `tools/check_docs_links.py`: relative Markdown links must resolve;
-6. `pytest -q`;
-7. ECDH round-trip smoke with `MIBAND_ECDH_BACKEND=python`;
-8. demo full path: `--demo 2 --imu --sync-history 1 --sync-sleep-spo2 --storage both --export-csv`;
-9. Verify that demo artifacts are non-empty (JSONL, `mi_band.db`, CSV).
+6. `tools/check_test_baseline.py`: test-count claims in the READMEs / cross-platform guide must not drift from the collected suite;
+7. `pytest -q`;
+8. ECDH round-trip smoke with `MIBAND_ECDH_BACKEND=python`;
+9. demo full path: `--demo 2 --imu --sync-history 1 --sync-sleep-spo2 --storage both --export-csv`;
+10. Verify that demo artifacts are non-empty (JSONL, `mi_band.db`, CSV).
 
 You can run these commands locally one by one; a link-check failure prints `FAIL <file> -> <target>` directly.
 

@@ -52,6 +52,7 @@
 | Zepp 上有数据，手环里取不到 | 三种原因：① 已被 App 取走（40 小时外有永久空洞或超窗）；② 手环从不产这类数据（深睡/REM/得分是 App 现算）；③ 那一夜未佩戴（`0xF3`），App 显示的是同账号另一台设备。见 [investigations/sleep-fields.md](../investigations/sleep-fields.zh-CN.md)。 |
 | 想确认手环还留着多早的数据 | `python tools/probe_declared.py 168 24`：只问不取、不发 ACK，不扰动缓冲。 |
 | 0x26 睡眠血氧导入后没看到 | 确认写入独立 `spo2_sleep` 表；离线看板会优先读表、表空回退 JSONL。 |
+| 点测 `spo2` 表一直是空的 | 属预期：点测记录只由手环侧单次测量产生，没有就"声明 0 条"（INFO 日志可查）；要整夜曲线用 `--sync-sleep-spo2`（独立 `spo2_sleep` 表）。 |
 
 ## 看板与报告
 

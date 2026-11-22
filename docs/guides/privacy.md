@@ -22,6 +22,7 @@ This project produces and writes a large amount of personal data. The repository
 - `AUTH_KEY` is equivalent to the band's Bluetooth pairing credential; treat it as a password: do not paste it into issues, chat messages or screenshots;
 - `get_auth_key.py` / `fetch_by_token.py` write the result only to the local `.env`; the terminal shows only a masked status;
 - On multi-user Linux hosts, confirm that `ls -l .env` shows `-rw-------`; `--doctor` checks the permissions;
+- On Windows, check the real access list with `icacls .env`; if it shows `BUILTIN\Users` or `Authenticated Users`, tighten it to the current user only — PowerShell: `icacls .env /inheritance:r /grant:r "$(whoami):F"` (`tools/check_privacy.py` validates this on Windows and prints the exact ready-to-paste command, with the account name already resolved, when needed);
 - Do not put `.env` into Docker images, public directories of backup scripts, or shared cloud-drive directories.
 
 ## 3. Permission rules
@@ -33,7 +34,7 @@ This project produces and writes a large amount of personal data. The repository
 | `.env` | 0600 | Tightened on each startup attempt |
 | `validation/` (forensics) | Your responsibility | Already ignored, but 0700 is still recommended |
 
-Windows uses user ACLs; the `0600` semantics do not apply, but do not put the data directory in a shared location.
+Windows uses user ACLs; the `0600` semantics do not apply, but do not put the data directory in a shared location. `tools/check_privacy.py` inspects the real `.env` ACL on Windows (os.stat permission bits are always 0666 there and do not reflect actual access).
 
 ## 4. What is never committed
 

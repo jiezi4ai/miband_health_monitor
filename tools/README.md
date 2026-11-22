@@ -8,6 +8,7 @@ module docstring before running one.
 
 | Script | Purpose |
 |---|---|
+| backup_db.py | WAL-safe whole-database online backup + integrity/row-count verification + keep-N rotation; also exposed as `--backup PATH` on the main client. |
 | capture_history_payload.py | Capture raw band-side history payloads (.bin + SHA-256 metadata) for offline validation. |
 | import_spo2_sleep.py | Decode captured 0x26 payloads and replay them through TelemetryStore. |
 | probe_declared.py | Ask the firmware how much history it still holds without consuming it. |
@@ -19,6 +20,7 @@ module docstring before running one.
 | check_file_sizes.py | CI guard: first-party code/asset files must stay <= 300 lines. |
 | check_privacy.py | CI guard: no real MAC/auth key/home path in Git-tracked files. |
 | check_docs_links.py | CI guard: relative Markdown links resolve. |
+| check_test_baseline.py | CI guard: test-count claims in the READMEs / cross-platform guide must not drift from the collected suite. |
 
 Run everything from the repository root, for example:
 

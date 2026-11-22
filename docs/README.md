@@ -69,7 +69,28 @@ verbatim in their original language, and no number, date or reading is changed.
 | [validation/linux-validation.md](validation/linux-validation.md) | Ubuntu/BlueZ software stack + real-hardware verification report (L1–L10) |
 | [validation/linux-ble-connect-findings.md](validation/linux-ble-connect-findings.md) | 2026-11-12 investigation of unstable Linux connections and root-cause list |
 | [validation/linux-ble-test-report.md](validation/linux-ble-test-report.md) | Test 1–4 re-test conclusions, stale LTK root cause, self-healing logic and debug manual |
+| [validation/wsl2-usbipd-verification.zh-CN.md](validation/wsl2-usbipd-verification.zh-CN.md) | WSL2 + usbipd Bluetooth passthrough and real-device verification, 2026-11-17~18 (Chinese only for now) |
+| [validation/issue-register.zh-CN.md](validation/issue-register.zh-CN.md) | L1–L14 issue register: symptom, status and closing evidence (Chinese only for now) |
+| [validation/gadgetbridge-gate0.zh-CN.md](validation/gadgetbridge-gate0.zh-CN.md) | GB benchmark roadmap stage-0 fact-baseline gate: night count, `0x2c`/`0x05` real-device probe records, and B-3/B-12/B-13 unlock decisions (2026-11-20, Chinese only) |
+| [validation/gadgetbridge-phase1.zh-CN.md](validation/gadgetbridge-phase1.zh-CN.md) | GB benchmark roadmap stage-1 quick wins: B-2 schema version, B-9 kind single source, B-1 capability gate, B-11 whole-DB backup + baseline (2026-11-20, Chinese only) |
+| [validation/gadgetbridge-phase2.zh-CN.md](validation/gadgetbridge-phase2.zh-CN.md) | GB benchmark roadmap stage-2 architecture safety net: B-5 GATT transactions, B-6 FetchSession enhancement, B-4 device state machine + baseline (2026-11-20, Chinese only) |
+| [validation/gadgetbridge-phase3.zh-CN.md](validation/gadgetbridge-phase3.zh-CN.md) | GB benchmark roadmap stage-3 data understanding: B-7 multi-granularity co-axis view, B-8 KPI ranges, B-14 battery series + baseline; B-3 stays gated at 0 nights (2026-11-20, Chinese only) |
+| [validation/gadgetbridge-phase4.zh-CN.md](validation/gadgetbridge-phase4.zh-CN.md) | GB benchmark roadmap stage-4 verification-driven work: B-10 clock sync and B-12 workout summaries (both hardware-verified); B-13 `0x2c` still empty and suspended, B-15 deferred (2026-11-20, Chinese only) |
+| [validation/sleep-calibration-2026-11.zh-CN.md](validation/sleep-calibration-2026-11.zh-CN.md) | Sleep-staging calibration against seven Zepp Life nights (2026-11): corrected page-date convention, nap-vs-night matching bug, duplicate-minute de-duplication, per-reading errors and threshold sweep (2026-11-20, Chinese only) |
+| [validation/derived-metrics-probe-2026-11.zh-CN.md](validation/derived-metrics-probe-2026-11.zh-CN.md) | Derived-metric type-code probe (2026-11): six codes answered `0x02`, only `0x0d` PAI carries data and matches five Zepp values; includes the 102-byte layout and its 7-day series (2026-11-20, Chinese only) |
 | [investigations/sleep-fields.md](investigations/sleep-fields.md) | Sleep three-byte field forensics and comparison with Zepp Life / Gadgetbridge |
+
+## Risk register
+
+| Document | Contents |
+|---|---|
+| [improvement-plan.zh-CN.md](improvement-plan.zh-CN.md) | Known risks R-1…R-8 with measured evidence, root-cause analysis and proposed solutions (Chinese only for now) |
+
+## Benchmarking
+
+| Document | Contents |
+|---|---|
+| [gadgetbridge-benchmark.zh-CN.md](gadgetbridge-benchmark.zh-CN.md) | Gadgetbridge comparative analysis: feature gaps, data-link patterns, UI/data-visualization and engineering borrowables, with a prioritized adoption table, line-by-line source verification (§7) and an implementation roadmap (§8) (Chinese only for now) |
 
 ## Tools and conventions
 

@@ -34,14 +34,17 @@ the historical scripts remain as compatibility entry points.
 | SpO₂ | Fetched from band-side history (requires `--sync-history`, verified on real hardware) |
 | Historical activity | Per-minute activity intensity / steps / heart rate / sleep flags (requires `--sync-history`, verified on real hardware) |
 | Sleep SpO₂ 0x26 | `--sync-sleep-spo2` fetches whole-night SpO₂ (30 B layout **verified on real hardware**, 430 records in one night), written to a **separate** `spo2_sleep` table + JSONL + CSV; the offline dashboard draws the whole-night curve, fully isolated from spot-check `0x25` |
+| Workout summaries 0x05 | `--sync-sports` fetches band-side workout summaries (kind/duration/steps/distance/calories/average+max HR) into a separate `activity_summary` table + JSONL + CSV; Band 6 has no GPS, so no track is fetched |
+| Downlink clock sync | `--sync-time` writes the host clock to the standard CTS `0x2A2B`; `--sync-time-dry-run` only reads the drift, and a failed write never aborts the session |
 | Local history report | `history_report.py` summarizes heart rate / SpO₂ / activity data from SQLite, as text or JSON |
 | Sleep derivation | `sleep_analysis.py`: a `kind` state machine detects sleep windows, then heart-rate level and heart-rate variability ranks distinguish deep / light sleep (**derived values**, no REM output; the band does not report stages directly) |
-| Offline history dashboard | `history_dashboard.py` generates a **single-file HTML**: KPIs, sleep structure chart, heart rate, activity rhythm, steps, whole-night SpO₂ curve, spot-check SpO₂ table; no external resources, opens offline and can be shared as-is |
+| Offline history dashboard | `history_dashboard.py` generates a **single-file HTML**: KPIs (last night / week / month / full archive), sleep structure chart, heart rate, activity rhythm, **co-axis view** (step bars + HR line + sleep/nonwear band), steps, whole-night SpO₂ curve, spot-check SpO₂ table; no external resources, opens offline and can be shared as-is |
+| Live dashboard | SSE heart rate/SpO₂/steps/IMU plus **band battery** and connection state; a plain session also polls battery when `--web-port` is enabled |
 | Timestamps / persistence | Every record carries Unix seconds + UTC ISO-8601 milliseconds; JSONL append writes + SQLite WAL, either or both |
 | CSV export | Export 6 CSV tables from SQLite |
 | Auto-reconnect | Exponential-backoff reconnect after a session failure or link loss; a failed heart-rate keep-alive also triggers reconnect |
 | No-hardware demo | `--demo` runs the complete pipeline against the built-in simulated band (authentication, data streams, history sync, persistence, export) |
-| Tests | 270+ unit/integration tests, including a simulated BLE backend, **no real band needed**; CI covers Linux/Windows/macOS |
+| Tests | 390+ unit/integration tests, including a simulated BLE backend, **no real band needed**; CI covers Linux/Windows/macOS |
 
 ---
 
@@ -152,7 +155,9 @@ cp .env.example .env          # fill in DEVICE_ID (MAC or macOS UUID) and AUTH_K
 
 `.env` is git-ignored and will be tightened to 0600. The full variable table is in
 [docs/guides/configuration.md](docs/guides/configuration.md); if you do not have an
-`AUTH_KEY` yet, obtain one with `get_auth_key.py` / `fetch_by_token.py`.
+`AUTH_KEY` yet, obtain one with `fetch_by_token.py` (preferred — browser token route,
+unaffected by Xiaomi 2FA) or `get_auth_key.py` (fallback; its Xiaomi path is currently
+blocked by 2FA). See [configuration.md §3](docs/guides/configuration.md) for details.
 
 ### 4.3 Self-check and no-hardware demo
 
@@ -173,6 +178,8 @@ cp .env.example .env          # fill in DEVICE_ID (MAC or macOS UUID) and AUTH_K
 .venv/bin/python miband_client.py --export-csv       # capture until Ctrl+C, then export CSV
 .venv/bin/python miband_client.py --storage none     # log only, no persistence
 .venv/bin/python miband_client.py 60 --sync-history 7 --sync-sleep-spo2
+.venv/bin/python miband_client.py 60 --sync-history 7 --sync-sports   # workout summaries
+.venv/bin/python miband_client.py 5 --sync-time-dry-run --storage none  # read band clock drift first
 ```
 
 Real-device essentials: **turn off phone Bluetooth**; with no phone link the band only emits one
@@ -189,6 +196,7 @@ cache clearing is needed). See [docs/guides/cross-platform.md](docs/guides/cross
 .venv/bin/python history_report.py --hours 24                # text summary
 .venv/bin/python sleep_analysis.py --db data/mi_band.db      # sleep derivation
 .venv/bin/python history_dashboard.py -o history.html --days 7   # offline single-file dashboard
+.venv/bin/python history_dashboard.py -o week.html --range week --kpi-range week  # weekly co-axis view
 .venv/bin/python export_csv.py --db data/mi_band.db --output data/csv
 ```
 
@@ -254,7 +262,7 @@ This project is released under the [MIT License](LICENSE), Copyright © 2026 ale
 | Third party | Location | License / notes |
 |---|---|---|
 | `bleak` | dependency (requirements.txt) | MIT, cross-platform BLE wrapper |
-| `huami_token` | `huami_token/` | MIT, © 2025 Kirill Snezhko, Huami/Zepp cloud API client |
+| `huami_token` | `huami_token/` | MIT, © 2020–2025 Kirill Snezhko, Huami/Zepp cloud API client; vendored unmodified at upstream v0.8.0, see [`huami_token/VENDORED.md`](huami_token/VENDORED.md) |
 | `tiny-ECDH` (C) | `ecdh.c` / `ecdh.h` | upstream C implementation, compiled to `libecdh.so` as an accelerator |
 | `tiny-ECDH-python` | `vendor/tiny_ecdh/` | MIT, © 2023 Daniel Oliveira, pure-Python fallback |
 | Gadgetbridge (protocol reference) | no code copied | AGPL-3.0, used only as reference for publicly reverse-engineered protocol facts |

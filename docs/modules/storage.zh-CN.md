@@ -9,7 +9,7 @@
 - JSONL：一行一个 JSON 对象，按流分文件、追加写；
 - SQLite：单个 `mi_band.db`（WAL），一流一表、按 `ts` 建索引；
 - 后台单写线程：生产者只入队，消费者批量提交；
-- CSV 导出：从 SQLite 按固定列序导出六张表；
+- CSV 导出：从 SQLite 按固定列序导出七张表；
 - 权限：数据库/JSONL/目录在 POSIX 上收紧到 0600/0700。
 
 源码：[miband_monitor/storage/](../../miband_monitor/storage/)
@@ -18,7 +18,8 @@
 
 | 文件 | 内容 |
 |---|---|
-| `schema.py` | **单一事实来源**：表名/列名、`JSONL_FILENAMES`、`_SCHEMA`、`_INSERT_SQL`、`TABLE_COLUMNS`、`STORAGE_BACKENDS` |
+| `schema.py` | **单一事实来源**：表名/列名、`JSONL_FILENAMES`、`_SCHEMA`、`_INSERT_SQL`、`TABLE_COLUMNS`、`STORAGE_BACKENDS`、`SCHEMA_VERSION`/`MIGRATIONS` |
+| `summary_schema.py` | 运动总结表（0x05，B-12）的 DDL/列序/INSERT 与 v1→v2 迁移，避免 `schema.py` 超 300 行 |
 | `store.py` | `TelemetryStore`：公开 sink API、时间戳、队列、`stats`、`close` |
 | `writer.py` | `run_writer_loop`（批量提交、失败后排空队列）、`QUEUE_POLL_SECONDS` |
 | `sqlite.py` | `open_database`（WAL）、`insert_record`、`secure_database_files` |
@@ -36,6 +37,7 @@
 | `record_spo2(spo2, auto_measure, timestamp=None)` | 点测血氧（可指定手环采样时间） |
 | `record_activity_history(sample, timestamp=None)` | 每分钟活动记录 |
 | `record_spo2_sleep(sample)` | 整夜血氧，独立表 |
+| `record_activity_summary(sample)` | 手环侧运动总结（0x05），按 (start,end) 去重替换 |
 | `stats()` / `close()` / 上下文管理器 | 计数、排空队列、关闭 |
 | `export_database(db_path, output_dir)` / `export_table(...)` | CSV 导出 |
 | schema 常量（`HEART_RATE_TABLE` 等） | 供 sleep/offline_dashboard/reports 只读导入 |
@@ -64,7 +66,7 @@ close() ──> 入队 sentinel ──> join（最长 10s）──> 统计
 |---|---|---|
 | `--storage` / `STORAGE_BACKEND` | `both` | `jsonl` / `sqlite` / `both` / `none` |
 | `DB_FILENAME` | `mi_band.db` | 输出目录下的 SQLite 文件名 |
-| `JSONL_FILENAMES` | 六个流文件 | 与表名一一对应 |
+| `JSONL_FILENAMES` | 七个流文件 | 与表名一一对应 |
 | `COMMIT_BATCH_SIZE` | 200 | SQLite 批量提交大小 |
 | `QUEUE_POLL_SECONDS` | 0.5 | writer 队列轮询间隔 |
 | `CLOSE_JOIN_TIMEOUT` | 10.0 s | `close()` 等待 writer 退出的上限 |
@@ -80,6 +82,7 @@ close() ──> 入队 sentinel ──> join（最长 10s）──> 统计
 | `spo2` | `ts, iso_time, spo2, auto_measure` |
 | `activity_history` | `kind, intensity, steps, heart_rate, unknown1, sleep, deep_sleep, rem_sleep` |
 | `spo2_sleep` | `spo2, duration, spo2_high/low, signal_quality, extend`（尾部字节 JSON 文本） |
+| `activity_summary` | 运动总结：`end_ts, duration_s, kind_code/name, steps, active_seconds, calories, distance_m, average/max/min_hr, average_pace_s_km, version, has_gps`；`(ts,end_ts)` 唯一 |
 
 字段级格式见 [guides/data-formats.md](../guides/data-formats.zh-CN.md)。
 

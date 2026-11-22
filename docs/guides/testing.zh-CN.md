@@ -41,10 +41,11 @@
 3. `tools/check_file_sizes.py`：第一方代码/资源 ≤300 行；
 4. `tools/check_privacy.py`：Git 跟踪文件不得含真实 MAC/密钥/路径；
 5. `tools/check_docs_links.py`：相对 Markdown 链接必须可解析；
-6. `pytest -q`；
-7. `MIBAND_ECDH_BACKEND=python` 的 ECDH 往返冒烟；
-8. demo 全链路：`--demo 2 --imu --sync-history 1 --sync-sleep-spo2 --storage both --export-csv`；
-9. 校验 demo 产物非空（JSONL、`mi_band.db`、CSV）。
+6. `tools/check_test_baseline.py`：README / 跨平台文档中的测试数量声明不得偏离实际收集的用例数；
+7. `pytest -q`；
+8. `MIBAND_ECDH_BACKEND=python` 的 ECDH 往返冒烟；
+9. demo 全链路：`--demo 2 --imu --sync-history 1 --sync-sleep-spo2 --storage both --export-csv`；
+10. 校验 demo 产物非空（JSONL、`mi_band.db`、CSV）。
 
 本地可逐条运行这些命令；链接检查失败会直接打印 `FAIL <文件> -> <目标>`。
 

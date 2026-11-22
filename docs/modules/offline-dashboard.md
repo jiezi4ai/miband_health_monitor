@@ -18,23 +18,28 @@ Source: [miband_monitor/offline_dashboard/](../../miband_monitor/offline_dashboa
 |---|---|
 | `constants.py` | Time windows, stage order/labels, data-source markers, `SPO2_SLEEP_JSONL` |
 | `strings.py` | KPI labels and page wording (historical output strings are kept unchanged) |
-| `sources.py` | Probes/reads the SQLite tables and `spo2_sleep.jsonl`, column names come from the storage schema |
+| `sources.py` | Probes/reads the SQLite tables (including 0x05 workout summaries) and `spo2_sleep.jsonl`, column names come from the storage schema |
 | `collect.py` | Assembles the activity/heart-rate/SpO2/sleep series and applies time-window filtering |
 | `packaging.py` | Packages template variables such as `DATA` and stage styles |
-| `kpis.py` | KPI computation (latest night, deep-sleep share, sleep efficiency, steps, heart-rate zones, minimum SpO2) |
-| `svg.py` | Sleep-stage chart (run-length compression, positioned by real timestamps) |
+| `combined.py` | Co-axis buckets (activity bars / heart-rate line / sleep band on one time axis) |
+| `ranges.py` | `day`/`week`/`month`/`all` semantics shared by the chart window and the KPIs |
+| `kpis.py` | KPI computation (default: latest night; week/month/all average sleep and compute daily steps) |
+| `svg.py` | Sleep-stage chart (run-length encoding; nonwear hatch / no-HR grey / no-record blank) |
 | `render.py` | Reads the HTML template and injects the data |
 | `cli.py` | `main` (the `history_dashboard.py` entry point) |
-| `assets/` | `history_dashboard.html`, `history_dashboard.css`, `history_dashboard.js`, `history_charts.js`, `history_dashboard_tables.js` |
+| `assets/` | `history_dashboard.html`, `history_dashboard.css`, `history_dashboard.js`, `history_charts.js`, `history_coaxis.js`, `history_dashboard_tables.js` |
 
 ## Public API
 
 | Name | Description |
 |---|---|
-| `collect(db_path, *, days=7, spo2_sleep_path=None)` | Returns the series and metadata needed for rendering |
+| `collect(db_path, *, days=7, spo2_sleep_path=None, range=None, kpi_range=None)` | Returns the series and metadata needed for rendering |
 | `render(payload)` / `build(...)` | Produces the full HTML string |
-| `hypnogram_svg(stages, height=44, lane_gap=1.0)` | Stage chart SVG |
-| `main(argv)` | CLI: `--db`, `-o/--output`, `--days`, `--spo2-sleep-jsonl` |
+| `hypnogram_svg(stages, height=44, lane_gap=1.0, nonwear=None, show_unknown=False)` | Stage chart SVG; optional nonwear hatch and no-HR grey |
+| `main(argv)` | CLI: `--db`, `-o/--output`, `--days`, `--range`, `--kpi-range`, `--spo2-sleep-jsonl` |
+
+When `activity_summary` rows exist, the page also renders a **workout summary table** (kind/duration/steps/distance/calories/HR);
+Band 6 has no GPS, so no track is drawn.
 
 ## Data flow
 
@@ -57,10 +62,15 @@ collect ──> kpis + svg ──> packaging ──> render(template) ──> a 
 |---|---|---|
 | `--db` | `data/mi_band.db` | Input database |
 | `-o/--output` | `dashboard_history.html` | Output file |
-| `--days` | 7 | Time window shown |
+| `--days` | 7 | Time window shown; used only when `--range` is absent |
+| `--range` | unset | `day` (1 day) / `week` (7) / `month` (30) / `all` (full DB); sets the window and co-axis bucket width |
+| `--kpi-range` | follows `--range`, else `day` | KPI aggregation range, independent of the chart window; a wider range widens the fetch window too |
 | `--spo2-sleep-jsonl` | Automatic fallback | Reads the forensic JSONL when the table is empty |
 
 KPI labels and stage colors are part of the output contract and are centralized in `strings.py` / `constants.py`.
+The co-axis view stacks step bars (left axis), the heart-rate line (right axis) and the sleep/nonwear band on one time axis:
+10-minute buckets for `day`, hourly for `week`, calendar-day for `month`/`all`.
+A bucket with no band-side record stays empty in all three channels: never zero-filled, never joined by a line, never painted as sleep.
 
 ## Failure modes
 

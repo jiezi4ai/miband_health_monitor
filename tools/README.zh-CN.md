@@ -7,6 +7,7 @@
 
 | 脚本 | 用途 |
 |---|---|
+| backup_db.py | SQLite 整库在线备份（WAL 安全）+ `integrity_check`/行数校验 + 保留 N 份轮换；主客户端也有 `--backup PATH`。 |
 | capture_history_payload.py | 抓取手环侧历史原始 payload（.bin + SHA-256 元数据），用于离线验证。 |
 | import_spo2_sleep.py | 解码抓取到的 0x26 payload，并通过 TelemetryStore 回放。 |
 | probe_declared.py | 询问固件还保留多少历史数据，但不消费这些数据。 |
@@ -19,6 +20,7 @@
 | check_file_sizes.py | CI 守门：第一方代码/资源文件必须 ≤ 300 行。 |
 | check_privacy.py | CI 守门：Git 跟踪文件中不得出现真实 MAC、auth key 或家目录路径。 |
 | check_docs_links.py | CI 守门：相对 Markdown 链接必须可以解析。 |
+| check_test_baseline.py | CI 守门：README / 跨平台文档中的测试数量声明不得偏离实际收集的用例数。 |
 
 所有命令都在仓库根目录执行，例如：
 

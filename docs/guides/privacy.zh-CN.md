@@ -23,6 +23,10 @@
 - `AUTH_KEY` 等价于手环蓝牙配对凭据，视同密码：不要粘贴到 issue、聊天或截图；
 - `get_auth_key.py` / `fetch_by_token.py` 只把结果写入本地 `.env`，终端仅显示掩码状态；
 - 多用户 Linux 主机上确认 `ls -l .env` 是 `-rw-------`；`--doctor` 会检查权限；
+- Windows 上用 `icacls .env` 查看真实访问列表；若出现 `BUILTIN\Users` 或 `Authenticated Users`，
+  收紧为仅当前用户——PowerShell：`icacls .env /inheritance:r /grant:r "$(whoami):F"`
+  （`tools/check_privacy.py` 在 Windows 上会校验这一点，需要时会打印已解析好账户名、
+  可直接粘贴的完整命令）；
 - 不要把 `.env` 放进 Docker 镜像、备份脚本的公开目录或云盘共享目录。
 
 ## 3. 权限规则
@@ -34,7 +38,8 @@
 | `.env` | 0600 | 每次启动尝试收紧 |
 | `validation/`（取证） | 自行保证 | 已被忽略，仍建议 0700 |
 
-Windows 使用用户 ACL；`0600` 语义不适用，但不要把数据目录放在共享位置。
+Windows 使用用户 ACL；`0600` 语义不适用，但不要把数据目录放在共享位置。`tools/check_privacy.py`
+在 Windows 上检查 `.env` 的真实 ACL（`os.stat` 的权限位在 Windows 上恒为 0666，不反映真实访问）。
 
 ## 4. 永远不会提交的内容
 

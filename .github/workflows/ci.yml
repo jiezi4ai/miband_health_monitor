@@ -37,6 +37,9 @@ jobs:
       - name: Documentation local-link check
         run: python tools/check_docs_links.py
 
+      - name: Documentation test-baseline check
+        run: python tools/check_test_baseline.py
+
       - name: Run unit/integration tests (no hardware)
         run: python -m pytest -q
 

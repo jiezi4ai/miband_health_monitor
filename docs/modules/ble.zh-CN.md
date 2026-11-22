@@ -30,6 +30,7 @@
 | `listener.py` | chunked 通知订阅与分发 |
 | `auth_state.py` / `auth_connect.py` / `auth_handshake.py` | 认证事件、连接编排、挑战响应状态机 |
 | `notifications.py` / `streams.py` | 心率/步数/IMU 通知处理与流启停 |
+| `time_sync.py` | `TimeSyncMixin`：CTS `0x2A2B` 读漂移/写校时（Mi Band 11 字节变体，失败不阻断） |
 | `client.py` | `MiBand6Client` 组合上述 mixin，保持公开类身份与属性 |
 
 ## 公开 API
