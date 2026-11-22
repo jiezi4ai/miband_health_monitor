@@ -65,8 +65,13 @@ class TelemetryStore:
             "spo2": 0,
             "activity_history": 0,
             "spo2_sleep": 0,
+            "activity_summary": 0,
+            "stress": 0,
         }
         self._dropped = 0
+        #: Upper bound of the last auto-generated timestamp (monotonic push,
+        #: see _enqueue). Explicit timestamps never update this.
+        self._last_auto_ts = 0.0
         self._thread: Optional[threading.Thread] = None
 
         if self._enabled:
@@ -179,6 +184,48 @@ class TelemetryStore:
             },
         )
 
+    def record_activity_summary(
+        self, sample: dict, timestamp: Optional[float] = None
+    ) -> None:
+        """Persist one band-side workout summary (0x05, B-12).
+
+        Summary rows are keyed by (start, end); the SQLite writer replaces an
+        existing pair so a retried sync does not duplicate a workout.
+        """
+        self._enqueue(
+            "activity_summary",
+            timestamp if timestamp is not None else sample.get("ts"),
+            {
+                "end_ts": float(sample.get("end_ts", 0) or 0),
+                "duration_s": int(sample.get("duration_s", 0) or 0),
+                "kind_code": int(sample.get("kind_code", 0) or 0),
+                "kind_name": str(sample.get("kind_name", "") or ""),
+                "steps": int(sample.get("steps", 0) or 0),
+                "active_seconds": int(sample.get("active_seconds", 0) or 0),
+                "calories": float(sample.get("calories", 0) or 0),
+                "distance_m": float(sample.get("distance_m", 0) or 0),
+                "average_hr": int(sample.get("average_hr") or 0),
+                "max_hr": int(sample.get("max_hr") or 0),
+                "min_hr": int(sample.get("min_hr") or 0),
+                "average_pace_s_km": int(sample.get("average_pace_s_per_km") or 0),
+                "version": int(sample.get("version", 0) or 0),
+                "has_gps": 1 if sample.get("has_gps") else 0,
+            },
+        )
+
+    def record_stress(self, sample: dict, timestamp: Optional[float] = None) -> None:
+        """Persist one automatic-stress reading (0x13); one row per minute.
+
+        The table has a unique index on ``ts`` and inserts with OR REPLACE, so a
+        re-sync of an overlapping window updates the minute instead of adding a
+        second copy of it.
+        """
+        self._enqueue(
+            "stress",
+            timestamp if timestamp is not None else sample.get("ts"),
+            {"stress": int(sample["stress"]), "band": str(sample.get("band", ""))},
+        )
+
     def stats(self) -> dict:
         """Return a snapshot of enqueue counters (useful for shutdown logs)."""
         with self._lock:
@@ -227,7 +274,18 @@ class TelemetryStore:
                 self._dropped += 1
                 return
             self._counts[kind] += 1
-        event_ts = time.time() if timestamp is None else float(timestamp)
+            if timestamp is None:
+                # Auto-stamped records must stay pairwise distinct: Windows
+                # time.time() can return one identical value for a burst of
+                # enqueue calls, and the SQLite writer dedups activity_history
+                # by ts equality (real repeats carry explicit band timestamps
+                # and are still deduplicated exactly as before).
+                event_ts = time.time()
+                if event_ts <= self._last_auto_ts:
+                    event_ts = self._last_auto_ts + 1e-6
+                self._last_auto_ts = event_ts
+            else:
+                event_ts = float(timestamp)
         self._queue.put((kind, event_ts, utc_iso(event_ts), payload))
 
     @staticmethod

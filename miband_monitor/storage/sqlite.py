@@ -15,7 +15,7 @@ import sqlite3
 from pathlib import Path
 
 from ..config.security import secure_path
-from .schema import _INSERT_SQL, _SCHEMA
+from .schema import _INSERT_SQL, _SCHEMA, migrate
 
 logger = logging.getLogger("MiBandStorage")
 
@@ -42,15 +42,27 @@ def secure_database_files(db_path: Path) -> None:
 
 
 def open_database(db_path: Path) -> sqlite3.Connection:
-    """Create/tighten the database file and return a WAL-mode connection."""
+    """Create/tighten the database file and return a WAL-mode connection.
+
+    The idempotent base schema is applied first, then the database is migrated
+    to :data:`~miband_monitor.storage.schema.SCHEMA_VERSION`. A legacy file with
+    no version stamp is adopted in place (rows untouched); a file written by a
+    newer schema is refused via :class:`SchemaVersionError` so this build cannot
+    silently downgrade it.
+    """
     if not db_path.exists():
         db_path.touch(mode=0o600, exist_ok=True)
     secure_path(db_path, is_dir=False)
     conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
-    conn.executescript(_SCHEMA)
-    conn.commit()
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
+        conn.executescript(_SCHEMA)
+        migrate(conn)
+        conn.commit()
+    except Exception:
+        conn.close()
+        raise
     secure_database_files(db_path)
     return conn
 
@@ -140,6 +152,33 @@ def insert_record(
                 json.dumps(payload["signal_quality"]),
                 json.dumps(payload["extend"]),
             ),
+        )
+    elif kind == "activity_summary":
+        conn.execute(
+            _INSERT_SQL[kind],
+            (
+                event_ts,
+                iso_time,
+                payload["end_ts"],
+                payload["duration_s"],
+                payload["kind_code"],
+                payload["kind_name"],
+                payload["steps"],
+                payload["active_seconds"],
+                payload["calories"],
+                payload["distance_m"],
+                payload["average_hr"],
+                payload["max_hr"],
+                payload["min_hr"],
+                payload["average_pace_s_km"],
+                payload["version"],
+                payload["has_gps"],
+            ),
+        )
+    elif kind == "stress":
+        conn.execute(
+            _INSERT_SQL[kind],
+            (event_ts, iso_time, payload["stress"], payload["band"]),
         )
     else:  # pragma: no cover - guarded by TelemetryStore callers
         raise ValueError(f"Unknown record kind: {kind}")

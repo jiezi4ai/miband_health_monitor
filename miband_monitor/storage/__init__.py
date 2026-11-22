@@ -21,6 +21,12 @@ from .export_csv import (
     export_table,
     main as export_csv_main,
 )
+from .backup import (
+    DEFAULT_KEEP,
+    backup_database,
+    summarize_counts,
+    verify_backup,
+)
 from .readers import (
     normalize_backend,
     read_jsonl,
@@ -40,6 +46,7 @@ from .schema import (
     IMU_TABLE,
     JSONL_FILENAMES,
     RECORD_KINDS,
+    SCHEMA_VERSION,
     SPO2_COLUMNS,
     SPO2_SLEEP_COLUMNS,
     SPO2_SLEEP_TABLE,
@@ -48,6 +55,9 @@ from .schema import (
     STEPS_TABLE,
     STORAGE_BACKENDS,
     TABLE_COLUMNS,
+    SchemaVersionError,
+    get_schema_version,
+    migrate,
 )
 from .store import TelemetryStore
 
@@ -56,6 +66,7 @@ logger = logging.getLogger("MiBandStorage")
 _SENTINEL = _writer._SENTINEL
 
 __all__ = [
+    "DEFAULT_KEEP",
     "ACTIVITY_HISTORY_COLUMNS",
     "ACTIVITY_HISTORY_TABLE",
     "DB_FILENAME",
@@ -67,6 +78,7 @@ __all__ = [
     "IMU_TABLE",
     "JSONL_FILENAMES",
     "RECORD_KINDS",
+    "SCHEMA_VERSION",
     "SPO2_COLUMNS",
     "SPO2_SLEEP_COLUMNS",
     "SPO2_SLEEP_TABLE",
@@ -75,12 +87,18 @@ __all__ = [
     "STEPS_TABLE",
     "STORAGE_BACKENDS",
     "TABLE_COLUMNS",
+    "SchemaVersionError",
     "TelemetryStore",
     "_INSERT_SQL",
     "_SCHEMA",
     "_SENTINEL",
+    "backup_database",
     "export_csv_main",
+    "get_schema_version",
     "logger",
+    "migrate",
+    "summarize_counts",
+    "verify_backup",
     "export_database",
     "export_table",
     "normalize_backend",

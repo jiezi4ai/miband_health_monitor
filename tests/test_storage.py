@@ -183,6 +183,8 @@ def test_export_csv_roundtrip(tmp_path):
         "spo2",
         "activity_history",
         "spo2_sleep",
+        "activity_summary",
+        "stress",
     }
     assert exported["heart_rate"][1] == 2
     assert exported["imu"][1] == 2
