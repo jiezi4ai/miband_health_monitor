@@ -18,6 +18,36 @@ function renderSpo2() {
   host.appendChild(table);
 }
 
+function renderSports() {
+  const host = document.getElementById("sportsPanel");
+  if (!host) return;
+  const sports = DATA.sports || [];
+  if (!sports.length) {
+    host.appendChild(el("div", "empty",
+      "该窗口内没有手环侧运动总结（需连接手环并加 --sync-history --sync-sports）。"));
+    return;
+  }
+  const table = el("table");
+  const head = el("tr");
+  ["开始", "结束", "类型", "时长", "步数", "距离", "消耗", "心率(均/峰)"]
+    .forEach(name => head.appendChild(el("th", "", name)));
+  table.appendChild(head);
+  sports.slice().reverse().forEach(item => {
+    const row = el("tr");
+    row.appendChild(el("td", "", item.start));
+    row.appendChild(el("td", "", item.end));
+    row.appendChild(el("td", "", item.kind_name || "--"));
+    row.appendChild(el("td", "num", `${Math.round(item.duration_s / 60)} 分`));
+    row.appendChild(el("td", "num", Number(item.steps).toLocaleString()));
+    row.appendChild(el("td", "num", `${(item.distance_m / 1000).toFixed(2)} km`));
+    row.appendChild(el("td", "num", `${Math.round(item.calories)} kcal`));
+    row.appendChild(el("td", "num",
+      item.average_hr ? `${item.average_hr} / ${item.max_hr}` : "--"));
+    table.appendChild(row);
+  });
+  host.appendChild(table);
+}
+
 function renderFooter() {
   const meta = DATA.meta;
   document.getElementById("footer").innerHTML =
@@ -37,7 +67,9 @@ renderKpis();
 renderSleep();
 renderHeartRate();
 renderActivity();
+renderCoAxis();
 renderSteps();
+renderSports();
 renderSpo2Sleep();
 renderSpo2();
 renderFooter();

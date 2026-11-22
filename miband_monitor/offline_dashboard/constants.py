@@ -16,7 +16,17 @@ from miband_monitor.config.health import (
     SPO2_MAX,
     SPO2_MIN,
 )
-from miband_monitor.sleep import STAGE_AWAKE, STAGE_DEEP, STAGE_LIGHT, STAGE_UNKNOWN
+from miband_monitor.sleep import (
+    BAND_ACTIVE,
+    BAND_CODES,
+    BAND_NONWEAR,
+    BAND_REST,
+    BAND_SLEEP,
+    STAGE_AWAKE,
+    STAGE_DEEP,
+    STAGE_LIGHT,
+    STAGE_UNKNOWN,
+)
 from miband_monitor.storage.schema import JSONL_FILENAMES
 
 #: Stage display order: deepest first, then light, awake, and the no-heart-rate
@@ -29,8 +39,9 @@ STAGE_LABELS = {
     STAGE_UNKNOWN: "无心率",
 }
 
-#: Activity band codes shared with the renderer.
-BAND_REST, BAND_ACTIVE, BAND_SLEEP, BAND_NONWEAR = 0, 1, 2, 3
+#: Activity band codes (BAND_REST/ACTIVE/SLEEP/NONWEAR) and BAND_CODES are
+#: re-exported from :mod:`miband_monitor.sleep.samples` -- the single source
+#: shared by the Python packager and the bundled JavaScript renderer (B-9).
 
 #: Local-time formats used in payload labels and report headings.
 LOCAL_DATETIME_FORMAT = "%m-%d %H:%M"

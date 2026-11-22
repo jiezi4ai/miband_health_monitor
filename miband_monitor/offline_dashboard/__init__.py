@@ -15,6 +15,8 @@ Module layout
 - :mod:`.strings`: exact KPI labels/hints and other user-facing copy
 - :mod:`.sources`: read-only SQLite/JSONL data sources
 - :mod:`.packaging`: heart-rate, activity-band and step payloads
+- :mod:`.combined`: co-axis time buckets (activity / heart rate / sleep band)
+- :mod:`.ranges`: day / week / month / all semantics shared by charts and KPIs
 - :mod:`.kpis`: the KPI cards
 - :mod:`.svg`: inline hypnogram SVG rendering
 - :mod:`.collect`: gathers the payload
@@ -28,6 +30,7 @@ from __future__ import annotations
 
 from .cli import build, main
 from .collect import collect
+from .combined import bucket_seconds, package_combined
 from .constants import (
     BAND_ACTIVE,
     BAND_NONWEAR,
@@ -65,9 +68,17 @@ from .packaging import (
     _valid_hr,
 )
 from .render import _TEMPLATE, render
+from .ranges import (
+    RANGE_CHOICES,
+    RANGE_DAYS,
+    RANGE_LABELS,
+    normalize_range,
+    resolve_ranges,
+)
 from .sources import (
     _byte_group,
     _load_activity,
+    _load_activity_summaries,
     _load_heart_rate,
     _load_spo2,
     _load_spo2_sleep,
@@ -113,6 +124,7 @@ __all__ = [
     "_byte_group",
     "_table_exists",
     "_load_activity",
+    "_load_activity_summaries",
     "_load_heart_rate",
     "_load_spo2",
     "_load_spo2_sleep",
@@ -121,6 +133,13 @@ __all__ = [
     "_package_heart_rate",
     "_package_activity",
     "_package_steps",
+    "bucket_seconds",
+    "package_combined",
+    "RANGE_CHOICES",
+    "RANGE_DAYS",
+    "RANGE_LABELS",
+    "normalize_range",
+    "resolve_ranges",
     "_kpis",
     "_stage_style",
     "STAGE_LANES",

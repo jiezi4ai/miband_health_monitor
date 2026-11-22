@@ -12,7 +12,7 @@ BASE = (datetime.now() - timedelta(days=2)).replace(
 ).timestamp()
 
 
-def make_db(tmp_path, *, activity=(), heart_rate=(), spo2=(), name="mi_band.db"):
+def make_db(tmp_path, *, activity=(), heart_rate=(), spo2=(), summaries=(), name="mi_band.db"):
     """Create a telemetry DB with the production schema and the given rows."""
     path = tmp_path / name
     conn = sqlite3.connect(str(path))
@@ -30,6 +30,13 @@ def make_db(tmp_path, *, activity=(), heart_rate=(), spo2=(), name="mi_band.db")
         conn.executemany(
             "INSERT INTO spo2 (ts, iso_time, spo2, auto_measure) VALUES (?, '', ?, ?)",
             list(spo2),
+        )
+        conn.executemany(
+            "INSERT INTO activity_summary (ts, iso_time, end_ts, duration_s, kind_code, "
+            "kind_name, steps, active_seconds, calories, distance_m, average_hr, max_hr, "
+            "min_hr, average_pace_s_km, version, has_gps) "
+            "VALUES (?, '', ?, ?, 1, 'outdoor_running', ?, 0, 123.4, 3211.5, 172, 187, 0, 0, 519, 0)",
+            [(ts, ts + 1600, 1600, 4351) for ts in summaries],
         )
         conn.commit()
     finally:

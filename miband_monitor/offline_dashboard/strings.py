@@ -15,8 +15,12 @@ LABEL_LAST_NIGHT_SLEEP = "最近一晚睡眠"
 LABEL_DEEP_SHARE = "深睡占比"
 LABEL_SLEEP_EFFICIENCY = "睡眠效率"
 LABEL_LAST_NIGHT_IN_BED = "最近一晚卧床"
+LABEL_SLEEP_AVG = "平均睡眠时长"
+LABEL_DEEP_SHARE_AVG = "平均深睡占比"
+LABEL_SLEEP_EFFICIENCY_AVG = "平均睡眠效率"
 LABEL_BAND_NOT_WORN = "手环未佩戴"
 LABEL_STEPS_TODAY = "今日步数"
+LABEL_STEPS_AVG = "日均步数"
 LABEL_HEART_RATE_RANGE = "心率区间"
 LABEL_SPO2_MIN = "血氧最低"
 
@@ -48,6 +52,7 @@ CLI_SUMMARY = (
     "  activity samples: {activity}, sleep sessions: {sessions}, "
     "point spo2: {spo2}, sleep spo2: {spo2_sleep} ({source})"
 )
+CLI_RANGE = "  range: {range} · KPI: {kpi}"
 
 
 # ---------------------------------------------------------------------------
@@ -81,6 +86,16 @@ def hint_awakenings(count: int) -> str:
 def hint_steps_activity(samples: int, total_steps: int) -> str:
     """Hint for the steps card: sample count and all-window total."""
     return f"{samples} 分钟样本 · 合计 {total_steps:,}"
+
+
+def hint_nights(count: int) -> str:
+    """Hint for an averaged sleep card: how many nights were averaged."""
+    return f"{count} 夜均值"
+
+
+def hint_days(days: int, total_steps: int) -> str:
+    """Hint for the daily-average steps card: days counted and the total."""
+    return f"{days} 天 · 合计 {total_steps:,}"
 
 
 def hint_hr_mean(mean: float) -> str:

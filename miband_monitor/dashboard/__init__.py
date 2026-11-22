@@ -15,8 +15,10 @@ import logging
 
 from ..storage.readers import utc_iso
 from .constants import (
+    BATTERY_KIND,
     DEFAULT_MAX_POINTS,
     DEFAULT_SNAPSHOT_POINTS,
+    EVENT_SERIES_KINDS,
     HTTP_HEADER_TIMEOUT,
     HTTP_READ_TIMEOUT,
     HTTP_STOP_TIMEOUT,
@@ -36,6 +38,8 @@ from .server import DashboardServer
 logger = logging.getLogger("MiBandDashboard")
 
 __all__ = [
+    "BATTERY_KIND",
+    "EVENT_SERIES_KINDS",
     "DEFAULT_MAX_POINTS",
     "DEFAULT_SNAPSHOT_POINTS",
     "DashboardServer",

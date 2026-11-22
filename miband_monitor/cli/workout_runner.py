@@ -79,11 +79,16 @@ async def backfill_activity_gap(
 
 async def run_battery_probe(
     client,
-    workout: WorkoutSession,
+    workout: Optional[WorkoutSession] = None,
     *,
     hub: Optional[TelemetryHub] = None,
 ) -> Optional[int]:
-    """Perform a conservative best-effort battery read when supported."""
+    """Read 0x2A19 best-effort and publish it as a battery series event.
+
+    The workout snapshot remains a bonus when a workout session exists; the
+    battery sample itself now belongs to the shared hub channel so a plain
+    monitoring session shows it on the dashboard too (B-14).
+    """
     read_fn = getattr(client, "read_battery_level", None)
     if not callable(read_fn):
         return None
@@ -92,7 +97,14 @@ async def run_battery_probe(
     except Exception as exc:
         logger.debug("Best-effort battery probe error: %s", exc)
         return None
-    if level is not None:
+    if level is None:
+        return None
+    if hub is not None:
+        try:
+            hub.publish_battery(level)
+        except Exception as exc:
+            logger.debug("Battery event publish failed: %s", exc)
+    if workout is not None:
         workout.record_battery(level)
         if hub is not None:
             hub.publish_workout(workout.snapshot(timeline_limit=_SSE_TIMELINE_LIMIT))
@@ -108,10 +120,16 @@ async def wait_session_with_battery(
     hub: Optional[TelemetryHub] = None,
     wait_for_fn=asyncio.wait_for,
 ) -> str:
-    """Wait until BLE link drops or *timeout* elapses, polling battery periodically."""
+    """Wait until BLE link drops or *timeout* elapses, polling battery periodically.
+
+    Battery probing is no longer gated on workout mode: a default session that
+    has a dashboard hub still publishes one reading at start and then every
+    ``battery_interval`` seconds.  With neither a workout nor a hub there is no
+    consumer for the reading, so the historical wait-only path is kept.
+    """
     if timeout is not None and timeout <= 0:
         return "timeout"
-    if workout is None or battery_interval <= 0:
+    if (workout is None and hub is None) or battery_interval <= 0:
         if timeout is None:
             await client.wait_until_disconnected()
             return "disconnected"

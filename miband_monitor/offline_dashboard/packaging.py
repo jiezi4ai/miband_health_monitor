@@ -13,13 +13,10 @@ import statistics
 from datetime import datetime
 from typing import Any, Optional, Sequence
 
-from miband_monitor.sleep import is_movement, is_nonwear
+from miband_monitor.sleep import activity_band
 
 from .constants import (
-    BAND_ACTIVE,
-    BAND_NONWEAR,
-    BAND_REST,
-    BAND_SLEEP,
+    BAND_CODES,
     DAY_FORMAT,
     HR_MAX,
     HR_MIN,
@@ -75,18 +72,13 @@ def _package_activity(
     sleep_minutes = sleep_minutes or set()
     points: list[list[float]] = []
     for item in activity:
-        if is_nonwear(item["kind"]):
-            # Checked first: both live in the 0xF0 family, and a night the band
-            # spent on the nightstand must not paint as hours of sleep.
-            code = BAND_NONWEAR
-        elif item["ts"] in sleep_minutes:
-            code = BAND_SLEEP
-        elif is_movement(item):
-            code = BAND_ACTIVE
-        else:
-            code = BAND_REST
+        # Single-point classifier (sleep/samples.py): nonwear is checked first
+        # so an unworn night never paints as hours of sleep.
+        code = activity_band(item, in_sleep=item["ts"] in sleep_minutes)
         points.append([item["ts"], code])
-    return {"points": points}
+    # Ship the code map with the series so the JS renderer reads the same
+    # constants instead of hardcoding ``code === 3`` for "not worn" (B-9).
+    return {"points": points, "bands": BAND_CODES}
 
 
 def _package_steps(activity: Sequence[dict]) -> dict[str, Any]:

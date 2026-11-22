@@ -17,7 +17,14 @@ from collections import deque
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 from ..storage.readers import utc_iso
-from .constants import DEFAULT_MAX_POINTS, DEFAULT_SNAPSHOT_POINTS, METRIC_KINDS, SSE_QUEUE_SIZE
+from .constants import (
+    BATTERY_KIND,
+    DEFAULT_MAX_POINTS,
+    DEFAULT_SNAPSHOT_POINTS,
+    EVENT_SERIES_KINDS,
+    METRIC_KINDS,
+    SSE_QUEUE_SIZE,
+)
 
 logger = logging.getLogger("MiBandDashboard")
 
@@ -33,6 +40,10 @@ class TelemetryHub:
         self._latest: Dict[str, dict] = {}
         self._counts: Dict[str, int] = {kind: 0 for kind in METRIC_KINDS}
         self._workout: Optional[dict] = None
+        # Out-of-band events (device state from B-4, battery from B-14) are
+        # remembered only as "latest" so a freshly loaded page can show them
+        # without waiting for the next SSE frame; they never join metric series.
+        self._event_latest: Dict[str, dict] = {}
         self._subscribers: set[asyncio.Queue] = set()
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._events_sent = 0
@@ -65,6 +76,7 @@ class TelemetryHub:
             "iso_time": utc_iso(event_ts),
             **payload,
         }
+        self._event_latest[kind] = record
         loop = self._loop
         if loop is not None and loop.is_running():
             try:
@@ -121,6 +133,20 @@ class TelemetryHub:
         self, spo2: int, status: int = 0, timestamp: Optional[float] = None
     ) -> None:
         self._publish("spo2", {"spo2": int(spo2), "status": int(status)}, timestamp)
+
+    def publish_battery(self, level: int, timestamp: Optional[float] = None) -> None:
+        """Publish one battery percentage as its own bounded series (B-14).
+
+        The series is created lazily: sessions that never read a battery keep
+        a snapshot identical to the pre-B-14 shape, and METRIC_KINDS stays the
+        schema-derived set used by /api/history?source=db.
+        """
+        value = int(level)
+        if not 0 <= value <= 100:
+            raise ValueError(f"battery level out of range [0..100]: {value}")
+        self._series.setdefault(BATTERY_KIND, deque(maxlen=self._max_points))
+        self._counts.setdefault(BATTERY_KIND, 0)
+        self._publish(BATTERY_KIND, {"level": value}, timestamp)
 
     def publish_workout(
         self, workout_snapshot: dict, timestamp: Optional[float] = None
@@ -193,6 +219,7 @@ class TelemetryHub:
             "counts": dict(self._counts),
             "latest": dict(self._latest),
             "series": series,
+            "event_latest": dict(self._event_latest),
             "subscribers": len(self._subscribers),
             "events_sent": self._events_sent,
         }
@@ -206,9 +233,11 @@ class TelemetryHub:
         return payload
 
     def history(self, kind: str, limit: int = DEFAULT_SNAPSHOT_POINTS) -> List[dict]:
-        if kind not in METRIC_KINDS:
+        if kind not in self._series and kind not in METRIC_KINDS + EVENT_SERIES_KINDS:
             raise ValueError(f"unknown metric kind: {kind!r}")
-        buffer = self._series[kind]
+        buffer = self._series.get(kind)
+        if buffer is None:  # known event series with no samples yet
+            return []
         limit = max(0, int(limit))
         return list(buffer)[-limit:] if limit else []
 

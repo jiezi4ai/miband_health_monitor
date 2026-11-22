@@ -14,8 +14,14 @@ function renderHeader() {
   const range = meta.range[0] && meta.range[1]
     ? `${meta.range[0]} → ${meta.range[1]}`
     : "暂无数据";
+  const windowLabel = meta.days === null
+    ? "全库"
+    : `近 ${meta.days} 天（${meta.range_label}）`;
+  const coRange = document.getElementById("coRange");
+  if (coRange) coRange.textContent = meta.range_label;
   document.getElementById("range").innerHTML =
-    `<b>${range}</b> · 近 ${meta.days} 天 · 活动样本 ${meta.activity_samples} 分钟 · 生成于 ${meta.generated_at}`;
+    `<b>${range}</b> · ${windowLabel} · KPI 口径：${meta.kpi_label}` +
+    ` · 活动样本 ${meta.activity_samples} 分钟 · 生成于 ${meta.generated_at}`;
 }
 
 function renderKpis() {
@@ -54,6 +60,11 @@ function renderSleep() {
     const hypno = el("div");
     hypno.innerHTML = session.svg;
     box.appendChild(hypno);
+
+    if (session.nonwear && session.nonwear.some(Boolean)) {
+      box.appendChild(el("div", "hint",
+        "色带底部斜纹=手环记录到的“未佩戴”；灰块=有记录但无心率；空白=这一分钟没有记录。三者含义不同。"));
+    }
 
     const scaleRow = el("div", "scales");
     const duration = session.minutes_in_bed;

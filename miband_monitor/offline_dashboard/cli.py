@@ -16,8 +16,9 @@ from miband_monitor.config.defaults import DEFAULT_OFFLINE_DAYS
 from miband_monitor.config.security import secure_directory, secure_file
 
 from .collect import collect
+from .ranges import RANGE_CHOICES, RANGE_LABELS, normalize_range
 from .render import render
-from .strings import CLI_ERROR, CLI_SUMMARY, CLI_WROTE
+from .strings import CLI_ERROR, CLI_RANGE, CLI_SUMMARY, CLI_WROTE
 
 
 def build(
@@ -26,8 +27,13 @@ def build(
     *,
     days: int = DEFAULT_OFFLINE_DAYS,
     spo2_sleep_path: str | Path | None = None,
+    range: Optional[str] = None,
+    kpi_range: Optional[str] = None,
 ) -> Path:
-    payload = collect(db_path, days=days, spo2_sleep_path=spo2_sleep_path)
+    payload = collect(
+        db_path, days=days, spo2_sleep_path=spo2_sleep_path,
+        range=range, kpi_range=kpi_range,
+    )
     html = render(payload)
     target = Path(output)
     # ``--output data/reports/dash.html`` is a natural thing to type; don't make
@@ -49,6 +55,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help=f"window in days (default {DEFAULT_OFFLINE_DAYS})",
     )
     parser.add_argument(
+        "--range", choices=RANGE_CHOICES, default=None,
+        help="semantic window: day / week / month / all (overrides --days)",
+    )
+    parser.add_argument(
+        "--kpi-range", choices=RANGE_CHOICES, default=None,
+        help="KPI aggregation range (default: follows --range, else day)",
+    )
+    parser.add_argument(
         "--spo2-sleep-jsonl",
         default=None,
         help=(
@@ -57,20 +71,33 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    try:
+        normalize_range(args.range)
+        normalize_range(args.kpi_range)
+    except ValueError as exc:
+        parser.error(str(exc))
 
     try:
         target = build(
             args.db, args.output, days=args.days,
             spo2_sleep_path=args.spo2_sleep_jsonl,
+            range=args.range, kpi_range=args.kpi_range,
         )
         payload = collect(
-            args.db, days=args.days, spo2_sleep_path=args.spo2_sleep_jsonl
+            args.db, days=args.days, spo2_sleep_path=args.spo2_sleep_jsonl,
+            range=args.range, kpi_range=args.kpi_range,
         )
     except (FileNotFoundError, sqlite3.Error) as exc:
         print(CLI_ERROR.format(message=exc), file=sys.stderr)
         return 1
 
     print(CLI_WROTE.format(target=target, size=target.stat().st_size // 1024))
+    print(
+        CLI_RANGE.format(
+            range=payload["meta"]["range_label"],
+            kpi=RANGE_LABELS.get(payload["meta"]["kpi_range"], payload["meta"]["kpi_range"]),
+        )
+    )
     print(
         CLI_SUMMARY.format(
             activity=payload["meta"]["activity_samples"],

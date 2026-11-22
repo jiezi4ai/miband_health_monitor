@@ -24,6 +24,7 @@ _CSS_ASSET = "history_dashboard.css"
 _SCRIPT_ASSETS = (
     "history_dashboard.js",
     "history_charts.js",
+    "history_coaxis.js",
     "history_dashboard_tables.js",
 )
 _CSS_MARKER = "__STYLE__"

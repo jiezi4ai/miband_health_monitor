@@ -103,7 +103,13 @@ function renderActivity() {
     const left = 54, rowGap = 5;
     const rowH = Math.max(8, (height - rowGap * (days - 1)) / days);
     const plotW = width - left - 6;
-    const colors = ["#33404f", "#4ade80", "#8b5cf6", "#1e2630"]; // rest / active / sleep / not worn
+    // Band codes come from the payload (sleep/samples.py -- the single source
+    // shared with the Python packager); never hardcode `3` for "not worn".
+    const bands = DATA.activity.bands || {REST:0, ACTIVE:1, SLEEP:2, NONWEAR:3};
+    const colors = {
+      [bands.REST]: "#33404f", [bands.ACTIVE]: "#4ade80",
+      [bands.SLEEP]: "#8b5cf6", [bands.NONWEAR]: "#1e2630"
+    };
     // "Not worn" and "no record" are two different facts and must not look the
     // same.  The band writes a state byte for every minute it was off the wrist
     // (0xF3), so those minutes are *measured*; a hole in the history is a minute
@@ -142,7 +148,7 @@ function renderActivity() {
       if (day < 0 || day >= days) continue;
       const minute = (ts - (firstDay + day * DAY)) / 60;
       const y = day * (rowH + rowGap);
-      ctx.fillStyle = code === 3 ? nonwearHatch : (colors[code] || "#333");
+      ctx.fillStyle = code === bands.NONWEAR ? nonwearHatch : (colors[code] || "#333");
       ctx.fillRect(left + (minute / 1440) * plotW, y, cellW, rowH);
     }
 

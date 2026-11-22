@@ -1,9 +1,17 @@
 "use strict";
 
+// Optional WEB_TOKEN: when the server requires one, it is passed as ?token=
+// in the page URL and forwarded to every API/SSE request.
+const _pageToken = new URLSearchParams(location.search).get("token") || "";
+const _withToken = (url) =>
+  _pageToken ? url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(_pageToken) : url;
+
 const MAX_POINTS = 300;                       // points kept per chart in the browser
 const HISTORY_LIMIT = 300;                    // persisted rows requested on load
 const KINDS = ["heart_rate", "spo2", "steps", "imu"];
-const series = { heart_rate: [], spo2: [], steps: [], imu: [] };
+// Battery is a device event series (B-14): it lives in the hub's snapshot and
+// SSE stream but has no SQLite history table, so it is not part of KINDS.
+const series = { heart_rate: [], spo2: [], steps: [], imu: [], battery: [] };
 // Persisted rows are kept apart from the live buffer so every snapshot (the
 // initial fetch AND the first SSE frame) can merge them back without losing
 // history or duplicating points.
@@ -25,6 +33,7 @@ function applyLatest(kind, record) {
   latest[kind] = record;
   if (kind === "heart_rate") setText("hr", fmt(record.bpm));
   if (kind === "spo2") setText("spo2", fmt(record.spo2));
+  if (kind === "battery") setText("battery", fmt(record.level));
   if (kind === "steps") {
     setText("steps", fmt(record.steps));
     setText("dist", fmt(record.distance_m));
@@ -32,6 +41,21 @@ function applyLatest(kind, record) {
   }
   if (kind === "imu") setText("imu", fmt(record.magnitude_g, 2));
   setText("updated", new Date().toLocaleTimeString());
+}
+
+function applyDevice(record) {
+  const labels = {
+    not_connected: "未连接", connecting: "连接中", connected: "已连接",
+    initializing: "初始化中", initialized: "就绪"
+  };
+  const node = el("deviceState");
+  if (!node) return;
+  node.classList.remove("hidden");
+  const task = record && record.busy_task ? " · " + record.busy_task : "";
+  const reconnects = record && record.reconnect_count
+    ? " · 重连 " + record.reconnect_count + " 次" : "";
+  node.textContent = "设备：" + (labels[(record || {}).state] || (record || {}).state || "--")
+    + task + reconnects;
 }
 
 function scheduleRender() {
@@ -110,6 +134,7 @@ function drawChart(canvasId, data, key, color, options) {
 function renderAll() {
   drawChart("hrChart", series.heart_rate, "bpm", "#ff5c7a", { min: 40, max: 180 });
   drawChart("spo2Chart", series.spo2, "spo2", "#38bdf8", { min: 85, max: 100 });
+  drawChart("batteryChart", series.battery, "level", "#fbbf24", { min: 0, max: 100 });
   drawChart("stepsChart", series.steps, "steps", "#4ade80", { min: 0 });
   drawChart("imuChart", series.imu, "magnitude_g", "#fbbf24", { min: 0 });
 
@@ -119,6 +144,9 @@ function renderAll() {
   const spo2Values = series.spo2.map((row) => row.spo2).filter((v) => typeof v === "number");
   setText("spo2Range", spo2Values.length ? Math.min.apply(null, spo2Values) + "–" +
           Math.max.apply(null, spo2Values) + " %" : "");
+  const batteryValues = series.battery.map((row) => row.level).filter((v) => typeof v === "number");
+  setText("batteryRange", batteryValues.length ? Math.min.apply(null, batteryValues) + "–" +
+          Math.max.apply(null, batteryValues) + " %" : "");
   const stepValues = series.steps.map((row) => row.steps).filter((v) => typeof v === "number");
   setText("stepsRange", stepValues.length ? "总计 " + stepValues[stepValues.length - 1] : "");
   const imuValues = series.imu.map((row) => row.magnitude_g).filter((v) => typeof v === "number");
@@ -144,6 +172,12 @@ function applyRecord(record) {
     messageCount += 1;
     setText("events", String(messageCount));
     scheduleRender();
+    return;
+  }
+  if (kind === "device") {
+    applyDevice(record);
+    messageCount += 1;
+    setText("events", String(messageCount));
     return;
   }
   if (!series[kind]) return;
@@ -174,8 +208,8 @@ function mergeRows(historyRows, liveRows) {
 
 function loadDbHistory() {
   return Promise.all(KINDS.map((kind) =>
-    fetch("/api/history?kind=" + encodeURIComponent(kind) +
-          "&source=db&limit=" + HISTORY_LIMIT)
+    fetch(_withToken("/api/history?kind=" + encodeURIComponent(kind) +
+          "&source=db&limit=" + HISTORY_LIMIT))
       .then((response) => response.ok ? response.json() : null)
       .then((payload) => {
         if (payload && Array.isArray(payload.rows)) dbSeries[kind] = payload.rows;
@@ -194,6 +228,11 @@ function applySnapshot(snapshot) {
     const rows = series[kind];
     if (rows.length) applyLatest(kind, rows[rows.length - 1]);
   }
+  // Battery has no DB history table; take the hub series directly.
+  series.battery = mergeRows([], snapshot.series.battery || []);
+  if (series.battery.length) applyLatest("battery", series.battery[series.battery.length - 1]);
+  const device = snapshot.event_latest && snapshot.event_latest.device;
+  if (device) applyDevice(device);
   if (snapshot.workout && window.MiBandWorkout) {
     window.MiBandWorkout.applyWorkout(snapshot.workout, series, MAX_POINTS);
   }
@@ -213,7 +252,7 @@ function setStatus(text, state) {
 }
 
 function connectEvents() {
-  const source = new EventSource("/events");
+  const source = new EventSource(_withToken("/events"));
   source.onopen = () => setStatus("实时连接", "on");
   source.onerror = () => setStatus("连接中断，自动重连…", "err");
   source.onmessage = (event) => {
@@ -230,7 +269,7 @@ function connectEvents() {
 // Load persisted rows BEFORE opening SSE: the stream's first frame is itself a
 // snapshot, and applying it earlier would wipe the history we just fetched.
 Promise.all([
-  fetch("/api/snapshot").then((response) => response.json()).catch(() => null),
+  fetch(_withToken("/api/snapshot")).then((response) => response.json()).catch(() => null),
   loadDbHistory(),
 ]).then(([snapshot]) => {
   applySnapshot(snapshot);

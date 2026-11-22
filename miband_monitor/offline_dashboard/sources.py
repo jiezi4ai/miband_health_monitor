@@ -19,6 +19,8 @@ from miband_monitor.storage.readers import table_exists as _table_exists
 from miband_monitor.storage.schema import (
     ACTIVITY_HISTORY_COLUMNS,
     ACTIVITY_HISTORY_TABLE,
+    ACTIVITY_SUMMARY_COLUMNS,
+    ACTIVITY_SUMMARY_TABLE,
     HEART_RATE_COLUMNS,
     HEART_RATE_TABLE,
     SPO2_COLUMNS,
@@ -40,6 +42,13 @@ _SPO2_FIELDS = tuple(name for name in SPO2_COLUMNS if name in ("ts", "spo2", "au
 _SPO2_SLEEP_FIELDS = tuple(
     name for name in SPO2_SLEEP_COLUMNS if name not in ("id", "iso_time")
 )
+_SUMMARY_FIELDS = tuple(
+    name
+    for name in ACTIVITY_SUMMARY_COLUMNS
+    if name
+    in ("ts", "end_ts", "kind_name", "steps", "distance_m", "calories",
+        "average_hr", "max_hr", "duration_s")
+)
 
 
 def _local(timestamp: float, fmt: str = LOCAL_DATETIME_FORMAT) -> str:
@@ -58,18 +67,26 @@ def _byte_group(value: Any) -> list[int]:
 
 
 def _load_activity(conn: sqlite3.Connection, since: float) -> list[dict]:
-    """Band-side minute history, oldest first (empty when the table is absent)."""
+    """Band-side minute history, oldest first (empty when the table is absent).
+
+    One row per minute: repeated ``ts`` values are collapsed. The JSONL writer
+    de-duplicates only against its own file, so a SQLite-only run can leave the
+    same minute twice, which would double-count steps and activity minutes.
+    """
     if not _table_exists(conn, ACTIVITY_HISTORY_TABLE):
         return []
-    return [
-        {"ts": float(ts), "kind": int(kind), "intensity": int(intensity),
-         "steps": int(steps), "heart_rate": int(hr)}
-        for ts, kind, intensity, steps, hr in conn.execute(
-            f"SELECT {', '.join(_ACTIVITY_FIELDS)} FROM {ACTIVITY_HISTORY_TABLE} "
-            "WHERE ts >= ? ORDER BY ts",
-            (since,),
+    by_ts: dict[float, dict] = {}
+    for ts, kind, intensity, steps, hr in conn.execute(
+        f"SELECT {', '.join(_ACTIVITY_FIELDS)} FROM {ACTIVITY_HISTORY_TABLE} "
+        "WHERE ts >= ? ORDER BY ts",
+        (since,),
+    ):
+        by_ts.setdefault(
+            float(ts),
+            {"ts": float(ts), "kind": int(kind), "intensity": int(intensity),
+             "steps": int(steps), "heart_rate": int(hr)},
         )
-    ]
+    return list(by_ts.values())
 
 
 def _load_heart_rate(conn: sqlite3.Connection, since: float) -> list[tuple[float, int]]:
@@ -168,3 +185,32 @@ def _load_spo2_sleep(
             )
     rows.sort(key=lambda item: item["ts"])
     return rows, SOURCE_JSONL if rows else SOURCE_NONE
+
+
+def _load_activity_summaries(conn: sqlite3.Connection, since: float) -> list[dict]:
+    """Band-side workout summaries (0x05), oldest first.
+
+    An older database simply has no table; the page then shows no workout
+    section data instead of failing.
+    """
+    if not _table_exists(conn, ACTIVITY_SUMMARY_TABLE):
+        return []
+    return [
+        {
+            "ts": float(ts),
+            "end_ts": float(end_ts),
+            "duration_s": int(duration_s),
+            "kind_name": str(kind_name or ""),
+            "steps": int(steps),
+            "distance_m": float(distance_m),
+            "calories": float(calories),
+            "average_hr": int(average_hr),
+            "max_hr": int(max_hr),
+        }
+            for ts, end_ts, duration_s, kind_name, steps, distance_m, calories, average_hr, max_hr
+            in conn.execute(
+            f"SELECT {', '.join(_SUMMARY_FIELDS)} FROM {ACTIVITY_SUMMARY_TABLE} "
+            "WHERE ts >= ? ORDER BY ts",
+            (since,),
+        )
+    ]

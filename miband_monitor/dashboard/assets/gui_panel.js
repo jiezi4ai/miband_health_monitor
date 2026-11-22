@@ -21,6 +21,9 @@
   };
 
   let userToggledCenter = false;
+  const _pageToken = new URLSearchParams(location.search).get("token") || "";
+  const _withToken = (url) =>
+    _pageToken ? url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(_pageToken) : url;
   const gEl = (id) => document.getElementById(id);
   const mk = (tag, cls, text) => {
     const node = document.createElement(tag);
@@ -35,7 +38,7 @@
       opts.headers["Content-Type"] = "application/json";
       opts.body = JSON.stringify(body);
     }
-    const resp = await fetch(url, opts);
+    const resp = await fetch(_withToken(url), opts);
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) throw new Error(data.error || "请求失败 (" + resp.status + ")");
     return data;

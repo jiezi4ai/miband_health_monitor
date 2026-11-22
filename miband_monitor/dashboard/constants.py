@@ -44,6 +44,13 @@ _DB_HISTORY_COLUMNS: Dict[str, str] = {
 
 METRIC_KINDS: Tuple[str, ...] = tuple(_DB_HISTORY_COLUMNS)
 
+#: Out-of-band series that live in the hub but have no SQLite history table.
+#: Battery is a device event (B-14): it gets a ring buffer like the metrics,
+#: but it is not persisted by make_db_history_provider and must not join
+#: METRIC_KINDS (which is derived from the schema above).
+BATTERY_KIND = "battery"
+EVENT_SERIES_KINDS: Tuple[str, ...] = (BATTERY_KIND,)
+
 #: In-memory ring-buffer size per live series (matches the historical default).
 MAX_POINTS = DEFAULT_MAX_POINTS
 #: Rows returned by /api/snapshot and used as the /api/history default limit.
@@ -62,6 +69,8 @@ HTTP_STOP_TIMEOUT = DEFAULT_HTTP_STOP_TIMEOUT
 __all__ = [
     "DEFAULT_MAX_POINTS",
     "DEFAULT_SNAPSHOT_POINTS",
+    "BATTERY_KIND",
+    "EVENT_SERIES_KINDS",
     "HTTP_HEADER_TIMEOUT",
     "HTTP_READ_TIMEOUT",
     "HTTP_STOP_TIMEOUT",
