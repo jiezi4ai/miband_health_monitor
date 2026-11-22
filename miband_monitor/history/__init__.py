@@ -14,6 +14,13 @@ The split keeps the wire codecs dependency-free so both the fetcher and the
 in-memory simulator can import them without pulling in a BLE backend.
 """
 
+from .capabilities import (
+    CAPABILITIES,
+    CapabilityStatus,
+    FetchCapability,
+    is_known_empty,
+    is_skippable,
+)
 from .models import HistoryFetchError, HistoryParseError, HistorySyncResult
 from .protocol import (
     ACTIVITY_SAMPLE_SIZE,
@@ -50,16 +57,34 @@ from .parsers import (
     parse_spo2_normal,
     parse_spo2_sleep,
 )
+from .fetch_session import (
+    PARSERS,
+    FetchProgress,
+    FetchSession,
+    fetch_with_recovery,
+    parse_with,
+    register_parser,
+)
 from .fetcher import BandHistoryFetcher
 from .sync import (
     _extend_activity,
     _extend_spo2,
     _extend_spo2_sleep,
+    _extend_sports,
+    _extend_stress,
+    _extend_stress,
     summarize_history_result,
     sync_history,
 )
+from .summary_parser import ACTIVITY_KINDS, parse_sports_summary
 
 __all__ = [
+    # capabilities (B-1 device gate)
+    "CAPABILITIES",
+    "CapabilityStatus",
+    "FetchCapability",
+    "is_known_empty",
+    "is_skippable",
     # models
     "HistoryFetchError",
     "HistoryParseError",
@@ -97,12 +122,24 @@ __all__ = [
     "parse_activity",
     "parse_spo2_normal",
     "parse_spo2_sleep",
+    # fetch session (B-6 progress / recovery / parser plug-in)
+    "PARSERS",
+    "FetchProgress",
+    "FetchSession",
+    "fetch_with_recovery",
+    "parse_with",
+    "register_parser",
     # fetcher
     "BandHistoryFetcher",
     # sync
     "_extend_activity",
     "_extend_spo2",
     "_extend_spo2_sleep",
+    "_extend_sports",
+    "_extend_stress",
+    "_extend_stress",
     "summarize_history_result",
     "sync_history",
+    "ACTIVITY_KINDS",
+    "parse_sports_summary",
 ]

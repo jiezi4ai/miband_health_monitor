@@ -41,6 +41,8 @@ from ..config.defaults import (
 )
 from ..config.env import env_float, env_optional_int, load_env, secure_env_file
 from ..storage.schema import STORAGE_BACKENDS
+from .backup_cli import add_backup_args, maybe_backup  # noqa: F401 - re-export for app.py
+from .time_args import add_time_args, time_sync_mode  # noqa: F401 - re-export
 
 
 def _env_float(name: str, default: float) -> float:
@@ -75,29 +77,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--device-id",
         default=_env_device_id(),
         metavar="ID",
-        help=(
-            "Bluetooth MAC address (Linux/Windows) or CoreBluetooth UUID (macOS) "
-            "of the band; defaults to DEVICE_ID / legacy DEVICE_MAC from .env"
-        ),
+        help=("Bluetooth MAC (Linux/Windows) or CoreBluetooth UUID (macOS) of the band; "
+              "defaults to DEVICE_ID / legacy DEVICE_MAC from .env"),
     )
     parser.add_argument(
         "--device-name",
         default=os.getenv(ENV_DEVICE_NAME, ""),
         metavar="NAME",
-        help=(
-            "optional advertised-name substring used as an extra discovery match "
-            "(useful on macOS where no MAC address is exposed; default: DEVICE_NAME env)"
-        ),
+        help=("optional advertised-name substring as an extra discovery match (useful on "
+              "macOS where no MAC is exposed; default: DEVICE_NAME env)"),
     )
     parser.add_argument(
         "--mtu",
         type=int,
         default=env_optional_int(ENV_BLE_MTU),
         metavar="BYTES",
-        help=(
-            "override the ATT MTU used to size chunked auth writes "
-            "(default: auto-detect, floor 23; env: BLE_MTU)"
-        ),
+        help=("override the ATT MTU used to size chunked auth writes "
+              "(default: auto-detect, floor 23; env: BLE_MTU)"),
     )
     parser.add_argument(
         "--sync-history",
@@ -106,28 +102,29 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=env_optional_int(ENV_HISTORY_DAYS),
         metavar="DAYS",
-        help=(
-            "fetch up to DAYS days of band-side history (activity + SpO2) after "
-            "connecting, experimental (default: off, or HISTORY_DAYS env)"
-        ),
+        help=("fetch up to DAYS days of band-side history (activity + SpO2) after "
+              "connecting, experimental (default: off, or HISTORY_DAYS env)"),
     )
     parser.add_argument(
-        "--sync-sleep-spo2",
-        action="store_true",
-        help=(
-            "also fetch experimental sleep SpO2 (type 0x26) for payload capture; "
-            "requires --sync-history; 30B layout verified, trailing fields unknown, "
-            "samples are written to spo2_sleep.jsonl only"
-        ),
+        "--sync-sleep-spo2", action="store_true",
+        help=("also fetch experimental sleep SpO2 (type 0x26); requires --sync-history; "
+              "30B layout verified, trailing fields unknown, samples go to spo2_sleep.jsonl"),
     )
+    parser.add_argument(
+        "--sync-sports", action="store_true",
+        help="also fetch band-side workout summaries (0x05); requires --sync-history",
+    )
+    parser.add_argument(
+        "--sync-stress", action="store_true",
+        help="also fetch automatic stress (0x13, 1 byte/minute); requires --sync-history",
+    )
+    add_time_args(parser)
     parser.add_argument(
         "--band-tz",
         default=os.getenv(ENV_BAND_TZ, ""),
         metavar="TZ",
-        help=(
-            "band local timezone for history fetch/timestamps, e.g. Asia/Shanghai "
-            "or +08:00 (default: host local timezone, or BAND_TZ env)"
-        ),
+        help=("band local timezone for history fetch/timestamps, e.g. Asia/Shanghai or "
+              "+08:00 (default: host local timezone, or BAND_TZ env)"),
     )
     parser.add_argument(
         "--demo",
@@ -146,10 +143,10 @@ def build_parser() -> argparse.ArgumentParser:
         help="storage backend (default: both)",
     )
     parser.add_argument(
-        "--export-csv",
-        action="store_true",
+        "--export-csv", action="store_true",
         help="export the SQLite database to CSV files after the session",
     )
+    add_backup_args(parser)
     parser.add_argument(
         "--scan-timeout",
         type=float,
@@ -160,11 +157,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--connect-timeout",
         type=float,
         default=env_float(ENV_CONNECT_TIMEOUT, DEFAULT_CONNECT_TIMEOUT),
-        help=(
-            "seconds allowed for BLE link establishment and service resolution "
-            "(default: 75; on Linux it is raised to at least one full 70 s "
-            "advertising period of a sleeping Mi Band 6)"
-        ),
+        help=("seconds allowed for BLE link establishment and service resolution "
+              "(default: 75; on Linux raised to at least one full 70 s "
+              "advertising period of a sleeping Mi Band 6)"),
     )
     parser.add_argument(
         "--log-level",
@@ -200,10 +195,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--no-direct-connect",
         action="store_true",
-        help=(
-            "always scan for the band instead of using the bonded BlueZ device "
-            "(Linux only; direct connect is the default when the band is paired)"
-        ),
+        help=("always scan for the band instead of the bonded BlueZ device (Linux only; "
+              "direct connect is the default when the band is paired)"),
     )
     parser.add_argument(
         "--workout",
@@ -238,19 +231,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--battery-interval",
         type=float,
         default=DEFAULT_BATTERY_POLL_SECONDS,
-        help=(
-            "best-effort Battery Service (0x2A19) poll interval in seconds during "
-            f"--workout (0 disables; default: {DEFAULT_BATTERY_POLL_SECONDS:g})"
-        ),
+        help=("best-effort Battery Service (0x2A19) poll interval in seconds "
+              "during --workout, or a default session with --web-port enabled "
+              f"(0 disables; default: {DEFAULT_BATTERY_POLL_SECONDS:g})"),
     )
     parser.add_argument(
         "--gap-fill-min",
         type=float,
         default=DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS,
-        help=(
-            "minimum disconnect gap (seconds) to trigger incremental ACTIVITY history "
-            f"gap-fill on reconnect (default: {DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS:g})"
-        ),
+        help=("minimum disconnect gap (seconds) to trigger incremental ACTIVITY history "
+              f"gap-fill on reconnect (default: {DEFAULT_WORKOUT_GAP_FILL_MIN_SECONDS:g})"),
     )
     parser.add_argument(
         "--hr-silence-soft",
@@ -281,6 +271,10 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.sync_sleep_spo2 and args.sync_history is None:
         parser.error("--sync-sleep-spo2 requires --sync-history [DAYS]")
+    if args.sync_sports and args.sync_history is None:
+        parser.error("--sync-sports requires --sync-history [DAYS]")
+    if args.sync_stress and args.sync_history is None:
+        parser.error("--sync-stress requires --sync-history [DAYS]")
     if args.age <= 0:
         parser.error("--age must be positive")
     if args.weight <= 0:

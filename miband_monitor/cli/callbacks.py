@@ -69,6 +69,12 @@ def build_callbacks(
     def _on_history_spo2_sleep(sample: dict) -> None:
         store.record_spo2_sleep(sample)
 
+    def _on_history_sports(sample: dict) -> None:
+        store.record_activity_summary(sample)
+
+    def _on_history_stress(sample: dict) -> None:
+        store.record_stress(sample)
+
     return StreamCallbacks(
         heart_rate=_on_heart_rate,
         steps=_on_steps,
@@ -76,4 +82,6 @@ def build_callbacks(
         history_spo2=_on_history_spo2,
         history_activity=_on_history_activity,
         history_spo2_sleep=_on_history_spo2_sleep,
+        history_sports=_on_history_sports,
+        history_stress=_on_history_stress,
     )

@@ -70,7 +70,7 @@ async def test_sync_history_warns_when_activity_ahead_of_utc(
             self.timeout = timeout
             self.band_tz = band_tz
 
-        async def fetch_payload(self, data_type, _since):
+        async def fetch_payload(self, data_type, _since, *, session=None):
             nonlocal calls
             calls += 1
             if data_type == FetchDataType.ACTIVITY and calls == 1:

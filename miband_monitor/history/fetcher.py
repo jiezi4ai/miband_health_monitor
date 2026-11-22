@@ -13,6 +13,7 @@ import zlib
 from datetime import datetime, tzinfo
 from typing import Optional
 
+from .fetch_session import FetchSession
 from .models import HistoryFetchError
 from .parsers import _trim_to_records
 from .protocol import (
@@ -202,8 +203,14 @@ class BandHistoryFetcher:
         self,
         data_type: FetchDataType,
         since: datetime,
+        *,
+        session: Optional[FetchSession] = None,
     ) -> tuple[bytes, float]:
-        """Fetch one history block; returns ``(payload, start_timestamp)``."""
+        """Fetch one history block; returns ``(payload, start_timestamp)``.
+
+        An optional :class:`FetchSession` receives phase-boundary progress; it
+        never changes the protocol flow (B-6 progress hook).
+        """
         # A previous round may have left notifications queued (the band pads its
         # last chunk, so extra packets can arrive after we stop reading).
         self._drain()
@@ -222,14 +229,13 @@ class BandHistoryFetcher:
             if len(metadata) < 3 or metadata[0] != RESPONSE or metadata[1] != COMMAND_START_DATE:
                 raise HistoryFetchError(f"unexpected start-date response: {metadata.hex()}")
             if metadata[2] != SUCCESS:
-                raise HistoryFetchError(
-                    f"band rejected fetch type {int(data_type):#04x} "
-                    f"(status 0x{metadata[2]:02x})"
-                )
+                raise HistoryFetchError(f"band rejected {int(data_type):#04x} (0x{metadata[2]:02x})")
             if len(metadata) < 7:
                 raise HistoryFetchError(f"truncated start-date response: {metadata.hex()}")
 
             expected_length = int.from_bytes(metadata[3:7], "little")
+            if session is not None:
+                session.progress("metadata", expected=expected_length)
             start_timestamp = _resolve_start_timestamp(metadata, since, tz=self.band_tz)
             # ACTIVITY reports a minute count here, not a byte count (verified on
             # hardware: 960 "bytes" for a 16-hour window), so the number is only
@@ -243,6 +249,10 @@ class BandHistoryFetcher:
             )
 
             if expected_length == 0:
+                # Make "no new data" explicit so an empty round is not mistaken for a bug.
+                logger.info("Band reports no new %s records since %s", data_type.name, since.isoformat())
+                if session is not None:
+                    session.progress("empty")
                 await self._send_ack()
                 return b"", start_timestamp
 
@@ -250,16 +260,13 @@ class BandHistoryFetcher:
 
             raw, completion = await self._collect(expected_length)
             logger.debug("Fetch completion response: %s", completion.hex())
+            if session is not None:
+                session.progress("complete", bytes_received=len(raw))
             payload = _trim_to_records(data_type, raw)
 
-            if (
-                data_type in (FetchDataType.SPO2_NORMAL, FetchDataType.SPO2_SLEEP)
-                and expected_length
-                and len(raw) < expected_length
-            ):
-                raise HistoryFetchError(
-                    f"incomplete payload: got {len(raw)} of {expected_length} byte(s)"
-                )
+            spO2_type = data_type in (FetchDataType.SPO2_NORMAL, FetchDataType.SPO2_SLEEP)
+            if spO2_type and expected_length and len(raw) < expected_length:
+                raise HistoryFetchError(f"incomplete payload: {len(raw)} of {expected_length}")
 
             if not payload:
                 await self._send_ack()
@@ -268,9 +275,7 @@ class BandHistoryFetcher:
             if len(completion) < 3 or completion[0] != RESPONSE or completion[1] != COMMAND_FETCH_DATA:
                 raise HistoryFetchError(f"unexpected completion response: {completion.hex()}")
             if completion[2] != SUCCESS:
-                raise HistoryFetchError(
-                    f"band reported fetch failure (status 0x{completion[2]:02x})"
-                )
+                raise HistoryFetchError(f"band fetch failure (0x{completion[2]:02x})")
 
             if len(completion) >= 7:
                 expected_crc = int.from_bytes(completion[3:7], "little")
@@ -283,12 +288,9 @@ class BandHistoryFetcher:
                     )
 
             await self._send_ack()
-            logger.debug(
-                "Fetched payload OK: %d bytes (raw %d), crc=%s",
-                len(payload),
-                len(raw),
-                "verified" if len(completion) >= 7 else "absent",
-            )
+            if session is not None:
+                session.progress("ack", bytes_received=len(payload))
+            logger.debug("Fetched payload OK: %d bytes (raw %d)", len(payload), len(raw))
             return payload, start_timestamp
         finally:
             await self._close()
